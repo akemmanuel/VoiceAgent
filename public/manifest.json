@@ -19,7 +19,7 @@
     "service_worker": "background/index.js",
     "type": "module"
   },
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "offscreen"],
   "host_permissions": ["https://auth.openai.com/*", "https://openrouter.ai/*"],
   "icons": {
     "16": "icons/icon-16.png",

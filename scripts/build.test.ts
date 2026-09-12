@@ -7,7 +7,7 @@ const manifest = await Bun.file(join(dist, "manifest.json")).json();
 describe("built extension", () => {
   test("uses MV3 with narrowly scoped permissions", () => {
     expect(manifest.manifest_version).toBe(3);
-    expect(manifest.permissions ?? []).toEqual(["activeTab", "scripting", "storage"]);
+    expect(manifest.permissions ?? []).toEqual(["activeTab", "scripting", "storage", "offscreen"]);
     expect(manifest.host_permissions ?? []).toEqual(["https://auth.openai.com/*", "https://openrouter.ai/*"]);
     expect(manifest.content_scripts ?? []).toEqual([]);
     expect(manifest.background.type).toBe("module");
@@ -29,7 +29,7 @@ describe("built extension", () => {
   });
 
   test("HTML references local, existing scripts and styles without inline scripts", async () => {
-    for (const page of ["popup", "options"]) {
+    for (const page of ["popup", "options", "offscreen"]) {
       const html = await Bun.file(join(dist, page, "index.html")).text();
       expect(html).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/i);
       for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) {

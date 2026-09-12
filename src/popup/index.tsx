@@ -1,9 +1,29 @@
-import { StrictMode, useState } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUpRightIcon, GearSixIcon, WaveformIcon } from "@phosphor-icons/react";
+import { ArrowUpRightIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, WaveformIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { PageSnapshot, TabAction, TabToolRequest, TabToolResponse } from "@/lib/tab-tools";
+import { isActive, type ConversationState } from "@/live/voice/conversation";
+import type { VoiceStatus, VoiceStatusMessage } from "@/live/voice/protocol";
+
+const VOICE_LABELS: Record<ConversationState, string> = {
+  idle: "Not listening",
+  listening: "Listening…",
+  capturing: "Hearing you…",
+  transcribing: "Transcribing…",
+  thinking: "Thinking…",
+  speaking: "Speaking",
+  failed: "Stopped",
+};
+
+async function sendVoice(message: { type: "voice-start" | "voice-stop" | "voice-status" }): Promise<VoiceStatus | null> {
+  try {
+    return (await chrome.runtime.sendMessage(message)) as VoiceStatus;
+  } catch {
+    return null;
+  }
+}
 
 async function sendTabTool(request: TabToolRequest): Promise<TabToolResponse> {
   try {
@@ -23,6 +43,27 @@ function Popup() {
   const [selector, setSelector] = useState("");
   const [text, setText] = useState("");
   const [highlightSeconds, setHighlightSeconds] = useState(8);
+  const [voice, setVoice] = useState<VoiceStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void sendVoice({ type: "voice-status" }).then(setVoice);
+    const listener = (message: unknown) => {
+      const update = message as VoiceStatusMessage;
+      if (update?.type === "voice-status-changed") setVoice(update.status);
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, []);
+
+  async function toggleVoice() {
+    setBusy(true);
+    setError(null);
+    const next = await sendVoice({ type: voice && isActive(voice.state) ? "voice-stop" : "voice-start" });
+    setBusy(false);
+    if (next) setVoice(next);
+    else setError("The voice session could not be reached. Try reopening the popup.");
+  }
 
   async function openSettings() {
     setOpening(true);
@@ -97,6 +138,18 @@ function Popup() {
             <Button variant="secondary" onClick={() => act({ kind: "scroll", deltaY: 600 })}>Scroll</Button>
           </div>
         </div>
+        <Button className="mt-6 w-full" onClick={toggleVoice} disabled={busy}>
+          {voice && isActive(voice.state) ? <MicrophoneSlashIcon aria-hidden="true" /> : <MicrophoneIcon aria-hidden="true" />}
+          {busy ? "Working…" : voice && isActive(voice.state) ? "Stop voice session" : "Start voice session"}
+        </Button>
+        {voice && (
+          <p role="status" className="mt-2 text-xs text-muted-foreground">
+            {VOICE_LABELS[voice.state]} · {voice.engine === "openrouter" ? "OpenRouter" : "ChatGPT"} engine
+          </p>
+        )}
+        {voice?.transcript && <p className="mt-3 text-xs leading-5"><span className="font-semibold">You:</span> {voice.transcript}</p>}
+        {voice?.reply && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Agent:</span> {voice.reply}</p>}
+        {voice?.error && <p role="alert" className="mt-3 text-sm leading-5 text-destructive">{voice.error}</p>}
         <Button className="mt-6 w-full" onClick={openSettings} disabled={opening}>
           <GearSixIcon aria-hidden="true" />
           {opening ? "Opening settings…" : "Open settings"}
@@ -104,7 +157,7 @@ function Popup() {
         </Button>
         {error && <p role="alert" className="mt-3 text-sm leading-5 text-destructive">{error}</p>}
       </section>
-      <p className="mt-5 text-xs leading-5 text-muted-foreground">No microphone access · Password fields are protected</p>
+      <p className="mt-5 text-xs leading-5 text-muted-foreground">The microphone is used only while a voice session is running · Password fields are protected</p>
     </main>
   );
 }

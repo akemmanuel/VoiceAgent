@@ -32,11 +32,13 @@ bun run check
 
 ```text
 src/
-  popup/          Popup HTML and React entry point
+  popup/          Popup HTML and React entry point, including voice controls
   options/        Settings HTML and React entry points, plus the engine and account panels
-  background/     MV3 service worker
+  offscreen/      Audio document: microphone capture, voice detection, playback
+  background/     MV3 service worker, tab tools, and voice session orchestration
   live/auth/      ChatGPT sign-in, token storage, and token refresh
   live/openrouter/ Chained engine: model catalog, chat, speech, transcription, settings
+  live/voice/     Voice loop: detection, turn-taking, the agent turn, audio helpers
   components/ui/  shadcn/ui button and separator
   lib/            Shared utilities, including the tab-tool message types
   styles/         Tailwind stylesheet and theme tokens
@@ -76,6 +78,18 @@ Two details worth knowing before changing this code. The catalog at `/api/v1/mod
 
 The key is entered on the settings page and stored in `chrome.storage.local`. It is never written to source, logged, or committed. Rotate any key that has been pasted into a chat or a file. `OPENROUTER_API_KEY=... bun run scripts/openrouter-smoke.ts` walks all three stages against the live API without a microphone.
 
+## Voice sessions
+
+**Start voice session** in the popup opens the microphone and runs the loop: detect speech, transcribe it, let the model decide whether to use a browser tool, then speak the reply. **Stop voice session** closes the microphone. The popup shows the live state, the last thing it heard, and the last reply.
+
+Microphone capture and playback live in an offscreen document, because an MV3 service worker cannot call `getUserMedia`. That document stays mechanical: it reports speech boundaries and plays audio, and owns no conversation logic. The worker decides what any of it means.
+
+Turn-taking is an explicit state machine in `src/live/voice/conversation.ts`, kept pure so it can be tested without a microphone: `listening -> capturing -> transcribing -> thinking -> speaking -> listening`. Speaking over the agent counts as a barge-in, which cuts playback, cancels the turn in flight, and starts listening again without releasing the microphone. A late reply from a cancelled turn is discarded rather than spoken.
+
+Speech detection in `src/live/voice/vad.ts` is energy-based with two thresholds, so speech has to be loud to start an utterance but only needs to stay above a lower bar to continue. A pause mid-sentence therefore does not split one sentence into two turns. It is not a learned VAD, so steady background noise needs its thresholds raised.
+
+The agent turn in `src/live/voice/turn.ts` runs a bounded tool loop over the tools in `src/background/tab-tools.ts`. A tool failure is reported back to the model rather than ending the turn, and the loop stops after `DEFAULT_MAX_TOOL_STEPS` rounds so a model that keeps calling tools cannot spend the user's balance indefinitely.
+
 ## Responsibilities
 
 - **akemmanuel** — Builds the tool that lets the agent run arbitrary sandboxed JavaScript.
@@ -84,9 +98,9 @@ The key is entered on the settings page and stored in `chrome.storage.local`. It
 
 ## Scope
 
-The popup exposes tab tools and opens settings. The settings page signs in to ChatGPT, stores those tokens, and holds OpenRouter settings; the voice loop itself is not implemented yet, so neither engine can hold a spoken conversation. The worker holds the tab tools and is an entry point for future live-session work.
+The popup exposes tab tools, voice controls, and opens settings. The settings page signs in to ChatGPT, stores those tokens, and holds OpenRouter settings. The OpenRouter engine can hold a spoken conversation; the ChatGPT engine still cannot, and says so rather than failing silently when selected.
 
-There is no voice recording or live audio yet, and no content scripts. The extension requests `activeTab` and `scripting` for the popup's tab tools, and `storage` plus host access to `auth.openai.com` and `openrouter.ai` for the two engines. Register future worker listeners at module scope; MV3 workers can stop when idle, so globals are not durable storage.
+The extension requests `activeTab` and `scripting` for the popup's tab tools, `storage` plus host access to `auth.openai.com` and `openrouter.ai` for the two engines, and `offscreen` for microphone capture and playback. There are no content scripts. Register future worker listeners at module scope; MV3 workers can stop when idle, so globals are not durable storage.
 
 ## Verification
 
@@ -95,6 +109,8 @@ The initial build loaded in Chromium. Both pages passed axe with zero violations
 The device sign-in flow was verified against the live auth server with `bun run scripts/device-flow-smoke.ts`, which completed a real sign-in and read the account id, user id, email, and plan type from the returned id token. The auth endpoints send `access-control-allow-origin: *`, so extension fetch needs no `declarativeNetRequest` rule. The account panel itself has not been exercised in a loaded extension yet, and no voice session has been opened.
 
 The OpenRouter model catalog was checked against the live API: 18 text-to-speech models, 21 speech-to-text models, and the deepseek reasoning default are all present, and the audio endpoints allow a `chrome-extension://` origin. The client is covered by tests against fixtures rather than live calls, so `scripts/openrouter-smoke.ts` still has to be run once with a funded key to confirm the real request shapes.
+
+The voice loop's logic is covered by 25 unit tests: detector thresholds and hysteresis, every state transition including barge-in and late replies, the tool loop and its step limit, and the audio helpers. **The loop has not been run with a real microphone in a loaded browser.** Microphone permission, recorder output format, and playback have never executed outside a test double, so treat the first live session as the real test of the audio layer.
 
 ## License
 

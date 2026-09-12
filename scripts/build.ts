@@ -9,7 +9,7 @@ await mkdir(dist, { recursive: true });
 await cp(join(root, "public"), dist, { recursive: true });
 
 const result = await Bun.build({
-  entrypoints: ["src/popup/index.tsx", "src/options/index.tsx", "src/background/index.ts"].map(path => join(root, path)),
+  entrypoints: ["src/popup/index.tsx", "src/options/index.tsx", "src/background/index.ts", "src/offscreen/main.ts"].map(path => join(root, path)),
   root: join(root, "src"),
   outdir: dist,
   naming: "[dir]/[name].[ext]",
@@ -21,7 +21,7 @@ const result = await Bun.build({
 });
 if (!result.success) throw new AggregateError(result.logs, "Extension bundle failed");
 
-for (const page of ["popup", "options"]) {
+for (const page of ["popup", "options", "offscreen"]) {
   await Bun.write(join(dist, page, "index.html"), Bun.file(join(root, "src", page, "index.html")));
 }
 
