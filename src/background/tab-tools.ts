@@ -9,8 +9,22 @@
 
 import type { AutomationProgram, AutomationResult, InteractiveElement, PageSnapshot, TabAction, TabToolResponse } from "@/lib/tab-tools";
 import type { ToolDefinition } from "@/live/openrouter/client";
+import { formatParsedTable, parseDelimitedText } from "./data-tools";
 
 export const BROWSER_TOOLS: ToolDefinition[] = [
+  {
+    name: "parse-csv",
+    description: "Parse CSV or TSV text locally into rows and columns. Preserve values as text so IDs, leading zeros, and currency strings are not changed. The text is limited to 1 MB and 1000 rows.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "The CSV or TSV text to parse." },
+        delimiter: { type: "string", description: "Optional one-character delimiter when automatic detection is not suitable." },
+      },
+      required: ["text"],
+      additionalProperties: false,
+    },
+  },
   {
     name: "inspect-active-tab",
     description: "Read the visible text, title, URL, and interactive controls of the browser tab the user is looking at.",
@@ -149,6 +163,18 @@ export async function executeBrowserTool(name: string, args: string): Promise<st
     if (value !== null && typeof value === "object" && !Array.isArray(value)) parsed = value as Record<string, unknown>;
   } catch {
     return "The arguments were not valid JSON. Call the tool again with valid arguments.";
+  }
+
+  if (name === "parse-csv") {
+    if (typeof parsed.text !== "string") return "parse-csv needs CSV or TSV text in its text argument.";
+    if (parsed.delimiter !== undefined && (typeof parsed.delimiter !== "string" || parsed.delimiter.length !== 1)) {
+      return "The optional delimiter must be exactly one character.";
+    }
+    try {
+      return formatParsedTable(parseDelimitedText(parsed.text, parsed.delimiter as string | undefined));
+    } catch (cause) {
+      return cause instanceof Error ? cause.message : "The CSV could not be parsed.";
+    }
   }
 
   if (name === "inspect-active-tab" || name === "capture-active-tab" || name === "wait-for-active-tab") {

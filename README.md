@@ -62,6 +62,8 @@ ChatGPT should use these tools through the message types in `src/lib/tab-tools.t
 
 For repetitive work, `run-automation` accepts a small declarative program with `click`, `type`, `select`, `check`, `scroll`, `wait`, `read`, and `for-each` steps. It runs only in the active tab, has no network or extension API access, is limited to 25 declared steps, 100 actions, 50 loop items, and 30 seconds, then returns a fresh page snapshot for the agent to verify. Buttons that look like final external actions are skipped rather than clicked.
 
+`parse-csv` reads pasted CSV or TSV text locally with Papa Parse. It preserves all values as text, so identifiers with leading zeroes and currency values are not silently converted. File selection, download, and PDF parsing are separate upcoming document tools.
+
 ### Browser-agent roadmap
 
 Implemented model tools are: inspection, visible-tab capture, dynamic waiting, bounded repetitive automation, and direct tab actions. The remaining capabilities are document download/parse/upload, full-page capture, open Shadow DOM and same-origin iframe traversal, cookie-banner guidance, structured extraction, and cross-tab workflows. Full Chrome Debugger accessibility/network inspection is intentionally deferred because it carries substantially broader page-debugging access than the current tools.
