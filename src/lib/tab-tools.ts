@@ -8,6 +8,10 @@ export type TabAction =
   | { kind: "highlight"; selector: string; label?: string; durationSeconds?: number }
   | { kind: "request-user-action"; selector: string; message: string; durationSeconds?: number };
 
+/** A bounded, declarative program for repetitive browser work. It is data, not page JavaScript. */
+export type AutomationProgram = { steps: unknown[] };
+export type AutomationResult = { completed: number; skippedFinalActions: number; outputs: Record<string, string[]> };
+
 export type InteractiveElement = {
   selector: string;
   tag: string;
@@ -34,8 +38,9 @@ export type TabToolRequest =
   | { type: "inspect-active-tab" }
   | { type: "capture-active-tab" }
   | { type: "wait-for-active-tab"; selector?: string; text?: string; timeoutMs?: number }
+  | { type: "run-automation"; program: AutomationProgram }
   | { type: "act-on-active-tab"; action: TabAction };
 
 export type TabToolResponse =
-  | { ok: true; snapshot?: PageSnapshot; screenshot?: string; found?: boolean; message?: string }
+  | { ok: true; snapshot?: PageSnapshot; screenshot?: string; found?: boolean; automation?: AutomationResult; message?: string }
   | { ok: false; error: string };

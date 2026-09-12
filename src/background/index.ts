@@ -3,7 +3,7 @@ import { isOffscreenEvent, isVoiceRequest } from "@/live/voice/protocol";
 import { handleOffscreenEvent, handleVoiceRequest } from "./live";
 import { handleTabToolRequest } from "./tab-tools";
 
-const TAB_TOOL_TYPES = ["inspect-active-tab", "capture-active-tab", "wait-for-active-tab", "act-on-active-tab"];
+const TAB_TOOL_TYPES = ["inspect-active-tab", "capture-active-tab", "wait-for-active-tab", "run-automation", "act-on-active-tab"];
 
 // MV3 workers can be suspended when idle, so this listener is registered at
 // module scope and keeps no state of its own.

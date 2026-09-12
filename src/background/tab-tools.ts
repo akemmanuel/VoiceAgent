@@ -7,7 +7,7 @@
  * through a message.
  */
 
-import type { InteractiveElement, PageSnapshot, TabAction, TabToolResponse } from "@/lib/tab-tools";
+import type { AutomationProgram, AutomationResult, InteractiveElement, PageSnapshot, TabAction, TabToolResponse } from "@/lib/tab-tools";
 import type { ToolDefinition } from "@/live/openrouter/client";
 
 export const BROWSER_TOOLS: ToolDefinition[] = [
@@ -31,6 +31,25 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
         text: { type: "string", description: "Optional visible text to wait for." },
         timeoutMs: { type: "number", description: "Wait time from 250 to 30000 milliseconds; defaults to 10000." },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "run-automation",
+    description: "Run a bounded, no-network browser program for repetitive work, then inspect the resulting page. Program steps are click, type, select, check, scroll, wait, read, or for-each. Never use this for final send, payment, publish, confirm, or delete actions; those are skipped and reported.",
+    parameters: {
+      type: "object",
+      properties: {
+        program: {
+          type: "object",
+          properties: {
+            steps: { type: "array", description: "At most 25 declarative steps. for-each supports operation click or read and max 50 matches." },
+          },
+          required: ["steps"],
+          additionalProperties: false,
+        },
+      },
+      required: ["program"],
       additionalProperties: false,
     },
   },
@@ -71,7 +90,7 @@ export function formatSnapshot(snapshot: PageSnapshot): string {
   return [`Page: ${snapshot.title}`, `URL: ${snapshot.url}`, `Viewport: ${snapshot.viewport.width}×${snapshot.viewport.height} at ${snapshot.viewport.scrollX},${snapshot.viewport.scrollY}`, "", snapshot.text, controls ? `\nControls:\n${controls}` : ""].join("\n").trim();
 }
 
-export async function handleTabToolRequest(request: { type: string; action?: TabAction }): Promise<TabToolResponse> {
+export async function handleTabToolRequest(request: { type: string; action?: TabAction; program?: AutomationProgram }): Promise<TabToolResponse> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!tab?.id) return { ok: false, error: "No active browser tab is available." };
@@ -96,6 +115,15 @@ export async function handleTabToolRequest(request: { type: string; action?: Tab
       });
       const found = result[0]?.result === true;
       return { ok: true, found, message: found ? "The requested page state appeared." : "Timed out waiting for the requested page state." };
+    }
+
+    if (request.type === "run-automation") {
+      if (!request.program) return { ok: false, error: "Automation needs a program." };
+      const result = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: runAutomation, args: [request.program] });
+      const automation = result[0]?.result as AutomationResult | undefined;
+      const inspected = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: inspectPage });
+      const snapshot = inspected[0]?.result as PageSnapshot | undefined;
+      return automation && snapshot ? { ok: true, automation, snapshot, message: "Automation completed and the page was checked." } : { ok: false, error: "The automation did not return a valid result." };
     }
 
     const action = request.action;
@@ -131,6 +159,13 @@ export async function executeBrowserTool(name: string, args: string): Promise<st
     if (name === "capture-active-tab") return response.screenshot ? "Captured a screenshot of the visible tab." : "The screenshot was empty.";
     if (name === "wait-for-active-tab") return response.message ?? "Finished waiting.";
     return response.snapshot ? formatSnapshot(response.snapshot) : "The page had no readable content.";
+  }
+
+  if (name === "run-automation") {
+    const response = await handleTabToolRequest({ type: name, program: parsed.program as AutomationProgram });
+    if (!response.ok) return response.error;
+    const summary = response.automation ? `Completed ${response.automation.completed} operations; skipped ${response.automation.skippedFinalActions} final actions.` : "No automation result.";
+    return `${summary}\n\nPage after automation:\n${response.snapshot ? formatSnapshot(response.snapshot) : "No page snapshot."}`;
   }
 
   if (name === "act-on-active-tab") {
@@ -345,4 +380,73 @@ function dispatchKey(element: Element, action: Extract<TabAction, { kind: "press
   element.dispatchEvent(new KeyboardEvent("keydown", options));
   element.dispatchEvent(new KeyboardEvent("keypress", options));
   element.dispatchEvent(new KeyboardEvent("keyup", options));
+}
+
+/** Executes data-only operations in the tab. No eval, fetch, extension APIs, or page-context code is exposed. */
+async function runAutomation(program: AutomationProgram): Promise<AutomationResult> {
+  if (!program || !Array.isArray(program.steps) || program.steps.length > 25) {
+    throw new Error("Automation programs need at most 25 steps.");
+  }
+  const deadline = Date.now() + 30_000;
+  let completed = 0;
+  let skippedFinalActions = 0;
+  const outputs: Record<string, string[]> = {};
+  const finalAction = (element: Element) => /\b(send|submit|senden|abschicken|pay|bezahlen|zahlung|confirm|bestätigen|delete|löschen|entfernen|publish|veröffentlichen)\b/u
+    .test([(element as HTMLElement).innerText, element.getAttribute("aria-label"), element.getAttribute("title"), (element as HTMLInputElement).value].filter(Boolean).join(" ").toLocaleLowerCase());
+  const record = (key: string, values: string[]) => { outputs[key] = [...(outputs[key] ?? []), ...values.map(value => value.replace(/\s+/g, " ").trim().slice(0, 500))]; };
+  const wait = (selector: string | undefined, text: string | undefined, timeout: number) => new Promise<void>((resolve, reject) => {
+    const stopAt = Date.now() + Math.max(250, Math.min(10_000, timeout));
+    const timer = window.setInterval(() => {
+      if (Date.now() > deadline || Date.now() > stopAt) { clearInterval(timer); reject(new Error("Timed out waiting during automation.")); return; }
+      if ((!selector || document.querySelector(selector)) && (!text || document.body?.innerText.includes(text))) { clearInterval(timer); resolve(); }
+    }, 100);
+  });
+
+  for (const rawStep of program.steps) {
+    if (Date.now() > deadline || completed >= 100) throw new Error("Automation reached its safety limit.");
+    if (!rawStep || typeof rawStep !== "object" || Array.isArray(rawStep)) throw new Error("Every automation step must be an object.");
+    const step = rawStep as Record<string, unknown>;
+    const op = step.op;
+    const selector = typeof step.selector === "string" ? step.selector : undefined;
+    if (typeof op !== "string") throw new Error("Every automation step needs an op.");
+    const element = selector ? document.querySelector(selector) : null;
+
+    if (op === "wait") { await wait(selector, typeof step.text === "string" ? step.text : undefined, typeof step.timeoutMs === "number" ? step.timeoutMs : 5_000); completed++; continue; }
+    if (op === "scroll") { window.scrollBy({ top: typeof step.deltaY === "number" ? Math.max(-2000, Math.min(2000, step.deltaY)) : 600, behavior: "smooth" }); completed++; continue; }
+    if (!element) throw new Error(`No element matches ${selector ?? "the required selector"}.`);
+    if (op === "read") { record(typeof step.key === "string" ? step.key : "read", [(element as HTMLElement).innerText || element.textContent || ""]); completed++; continue; }
+    if (op === "click") { if (finalAction(element)) skippedFinalActions++; else { (element as HTMLElement).click(); completed++; } continue; }
+    if (op === "type") {
+      if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) || element.type === "password") throw new Error("Only non-password text inputs can be automated.");
+      const text = typeof step.text === "string" ? step.text : "";
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
+      setter?.call(element, text); element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text })); element.dispatchEvent(new Event("change", { bubbles: true })); completed++; continue;
+    }
+    if (op === "select") {
+      if (!(element instanceof HTMLSelectElement)) throw new Error("Select requires a native dropdown.");
+      const value = typeof step.value === "string" ? step.value : "";
+      const option = [...element.options].find(candidate => candidate.value === value || candidate.text.trim() === value);
+      if (!option) throw new Error("Dropdown option was not found.");
+      element.value = option.value; element.dispatchEvent(new Event("change", { bubbles: true })); completed++; continue;
+    }
+    if (op === "check") {
+      if (!(element instanceof HTMLInputElement) || !["checkbox", "radio"].includes(element.type)) throw new Error("Check requires a checkbox or radio button.");
+      element.checked = step.checked === true; element.dispatchEvent(new Event("change", { bubbles: true })); completed++; continue;
+    }
+    if (op === "for-each") {
+      const operation = step.operation;
+      if (operation !== "read" && operation !== "click") throw new Error("for-each operation must be read or click.");
+      const limit = Math.max(1, Math.min(50, typeof step.limit === "number" ? step.limit : 20));
+      const elements = [...document.querySelectorAll(selector!)] .slice(0, limit);
+      for (const item of elements) {
+        if (Date.now() > deadline || completed >= 100) throw new Error("Automation reached its safety limit.");
+        if (operation === "read") record(typeof step.key === "string" ? step.key : "items", [(item as HTMLElement).innerText || item.textContent || ""]);
+        else if (finalAction(item)) skippedFinalActions++;
+        else { (item as HTMLElement).click(); completed++; }
+      }
+      continue;
+    }
+    throw new Error(`Unsupported automation operation: ${op}.`);
+  }
+  return { completed, skippedFinalActions, outputs };
 }
