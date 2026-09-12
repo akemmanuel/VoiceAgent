@@ -313,6 +313,7 @@ describe("agent turn", () => {
   test("tells the model when it has no browser tools", () => {
     expect(systemMessage([]).content).toContain("cannot act on the browser");
     expect(systemMessage(tools).content).toContain("inspect-active-tab");
+    expect(systemMessage(tools).content).toContain("For downloads, decide from the request");
   });
 });
 
