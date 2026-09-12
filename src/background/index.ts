@@ -77,20 +77,11 @@ function inspectPage(): PageSnapshot {
 }
 
 function performAction(action: TabAction): string {
-  if (action.kind === "clear-highlights") {
-    document.querySelectorAll("[data-voiceagent-highlight]").forEach(element => element.remove());
-    return "Cleared page highlights.";
-  }
-
-  if (action.kind === "scroll") {
-    window.scrollBy({ top: Math.max(-2000, Math.min(2000, action.deltaY)), behavior: "smooth" });
-    return "Scrolled the page.";
-  }
-
-  const element = document.querySelector(action.selector);
-  if (!element) throw new Error(`No element matches ${action.selector}.`);
-
-  if (action.kind === "highlight") {
+  const durationFor = (value: number | undefined) => {
+    const requestedDuration = value ?? 8;
+    return Number.isFinite(requestedDuration) ? Math.max(1, Math.min(60, requestedDuration)) : 8;
+  };
+  const highlight = (element: Element, label: string | undefined, durationSeconds: number) => {
     document.querySelectorAll("[data-voiceagent-highlight]").forEach(existing => existing.remove());
     const rect = element.getBoundingClientRect();
     const overlay = document.createElement("div");
@@ -101,18 +92,47 @@ function performAction(action: TabAction): string {
       `width:${rect.width + 8}px`, `height:${rect.height + 8}px`, "box-sizing:border-box", "pointer-events:none",
       "z-index:2147483647", "border:3px solid #f59e0b", "border-radius:6px", "box-shadow:0 0 0 4px rgba(245,158,11,.28)",
     ].join(";");
-    if (action.label) {
-      const label = document.createElement("span");
-      label.textContent = action.label.slice(0, 120);
-      label.style.cssText = "position:absolute;left:-3px;top:-30px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 8px;border-radius:4px;background:#92400e;color:#fff;font:600 13px system-ui,sans-serif;line-height:18px;box-shadow:0 1px 3px rgba(0,0,0,.25)";
-      overlay.append(label);
+    if (label) {
+      const caption = document.createElement("span");
+      caption.textContent = label.slice(0, 120);
+      caption.style.cssText = "position:absolute;left:-3px;top:-30px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 8px;border-radius:4px;background:#92400e;color:#fff;font:600 13px system-ui,sans-serif;line-height:18px;box-shadow:0 1px 3px rgba(0,0,0,.25)";
+      overlay.append(caption);
     }
     document.body.append(overlay);
     element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-    return "Highlighted the selected element.";
+    window.setTimeout(() => overlay.remove(), durationSeconds * 1000);
+  };
+  const needsUserClick = (element: Element) => {
+    const label = [(element as HTMLElement).innerText, element.getAttribute("aria-label"), element.getAttribute("title"), (element as HTMLInputElement).value]
+      .filter(Boolean).join(" ").toLocaleLowerCase();
+    return /\b(send|submit|senden|abschicken|pay|bezahlen|zahlung|place order|bestellung abschließen|confirm|bestätigen|delete|löschen|entfernen|veröffentlichen|publish)\b/u.test(label);
+  };
+
+  if (action.kind === "scroll") {
+    window.scrollBy({ top: Math.max(-2000, Math.min(2000, action.deltaY)), behavior: "smooth" });
+    return "Scrolled the page.";
+  }
+
+  const element = document.querySelector(action.selector);
+  if (!element) throw new Error(`No element matches ${action.selector}.`);
+
+  if (action.kind === "highlight") {
+    const durationSeconds = durationFor(action.durationSeconds);
+    highlight(element, action.label, durationSeconds);
+    return `Highlighted the selected element for ${durationSeconds} seconds.`;
+  }
+
+  if (action.kind === "request-user-action") {
+    const durationSeconds = durationFor(action.durationSeconds);
+    highlight(element, action.message, durationSeconds);
+    return `Asked the user to perform the final action; it is highlighted for ${durationSeconds} seconds.`;
   }
 
   if (action.kind === "click") {
+    if (needsUserClick(element)) {
+      highlight(element, "Bitte selbst klicken: finale Aktion", 12);
+      return "This appears to be a final external action, so it was highlighted for the user instead of clicked.";
+    }
     (element as HTMLElement).click();
     return "Clicked the selected element.";
   }
