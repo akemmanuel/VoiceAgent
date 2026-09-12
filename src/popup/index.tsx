@@ -1,9 +1,10 @@
 import { StrictMode, useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowCounterClockwiseIcon, CaretDownIcon, DownloadSimpleIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, PaperPlaneTiltIcon, SpinnerGapIcon, WaveformIcon } from "@phosphor-icons/react";
+import { ArrowCounterClockwiseIcon, CaretDownIcon, CaretUpIcon, DownloadSimpleIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, PaperPlaneTiltIcon, SpinnerGapIcon, WaveformIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { PageSnapshot, TabAction, TabToolRequest, TabToolResponse } from "@/lib/tab-tools";
+import { DEFAULT_DISPLAY_NAME, DISPLAY_NAME_STORAGE_KEY, readDisplayName } from "@/live/settings";
 import { isActive, type ConversationState } from "@/live/voice/conversation";
 import type { VoiceDebugReport, VoiceRequest, VoiceStatus, VoiceStatusMessage } from "@/live/voice/protocol";
 
@@ -51,15 +52,25 @@ function Popup() {
   const [resettingConversation, setResettingConversation] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [exportingDebug, setExportingDebug] = useState(false);
+  const [displayName, setDisplayName] = useState(DEFAULT_DISPLAY_NAME);
+  const [transcriptOpen, setTranscriptOpen] = useState(true);
 
   useEffect(() => {
     void sendVoice({ type: "voice-status" }).then(setVoice);
-    const listener = (message: unknown) => {
+    void readDisplayName().then(setDisplayName);
+    const messageListener = (message: unknown) => {
       const update = message as VoiceStatusMessage;
       if (update?.type === "voice-status-changed") setVoice(update.status);
     };
-    chrome.runtime.onMessage.addListener(listener);
-    return () => chrome.runtime.onMessage.removeListener(listener);
+    const storageListener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName === "local" && changes[DISPLAY_NAME_STORAGE_KEY]) void readDisplayName().then(setDisplayName);
+    };
+    chrome.runtime.onMessage.addListener(messageListener);
+    chrome.storage.onChanged.addListener(storageListener);
+    return () => {
+      chrome.runtime.onMessage.removeListener(messageListener);
+      chrome.storage.onChanged.removeListener(storageListener);
+    };
   }, []);
 
   async function toggleVoice() {
@@ -239,8 +250,8 @@ function Popup() {
             className="h-10 min-w-0 flex-1 rounded-lg border bg-background px-3 text-sm"
             value={writtenMessage}
             onChange={event => setWrittenMessage(event.target.value)}
-            placeholder="Write to the agent"
-            aria-label="Write to the agent"
+            placeholder={`Message as ${displayName}`}
+            aria-label={`Write to the agent as ${displayName}`}
             disabled={busy || sendingMessage}
           />
           <Button type="submit" size="icon" className="send-button size-10 rounded-lg" aria-label="Send message" disabled={!writtenMessage.trim() || busy || sendingMessage}>
@@ -256,9 +267,43 @@ function Popup() {
         </div>
 
         {(voice?.transcript || voice?.reply) && (
-          <div className="conversation-feed mt-4 max-h-28 space-y-2 overflow-y-auto rounded-lg p-3 text-xs leading-5">
-            {voice.transcript && <p><span className="font-semibold">You:</span> {voice.transcript}</p>}
-            {voice.reply && <p><span className="font-semibold">Agent:</span> {voice.reply}</p>}
+          <div className="transcript-panel mt-4 overflow-hidden rounded-xl">
+            <div className="flex items-center justify-between px-3 py-2">
+              <p className="text-xs font-semibold">Live transcription</p>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setTranscriptOpen(open => !open)}
+                aria-expanded={transcriptOpen}
+                aria-controls="transcript-content"
+                aria-label={transcriptOpen ? "Minimize transcription" : "Expand transcription"}
+                title={transcriptOpen ? "Minimize transcription" : "Expand transcription"}
+              >
+                {transcriptOpen ? <CaretUpIcon aria-hidden="true" /> : <CaretDownIcon aria-hidden="true" />}
+              </Button>
+            </div>
+            {transcriptOpen && (
+              <div id="transcript-content" className="conversation-feed max-h-48 space-y-3 overflow-y-auto border-t border-border p-3 text-xs leading-5">
+                {voice.transcript && (
+                  <div className="message-row message-user">
+                    <div className="message-meta justify-end">
+                      <span>{displayName}</span>
+                      <span className="message-avatar message-avatar-user" aria-hidden="true">{displayName.charAt(0).toUpperCase()}</span>
+                    </div>
+                    <p className="message-bubble message-bubble-user">{voice.transcript}</p>
+                  </div>
+                )}
+                {voice.reply && (
+                  <div className="message-row message-agent">
+                    <div className="message-meta">
+                      <span className="message-avatar message-avatar-agent" aria-hidden="true"><WaveformIcon weight="bold" /></span>
+                      <span>VoiceAgent</span>
+                    </div>
+                    <p className="message-bubble message-bubble-agent">{voice.reply}</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
         {voice?.levels && (

@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_CHATGPT_VOICE,
+  DEFAULT_DISPLAY_NAME,
   readChatGPTVoice,
+  readDisplayName,
   writeChatGPTVoice,
+  writeDisplayName,
 } from "./settings";
 
 describe("ChatGPT voice settings", () => {
@@ -34,5 +37,19 @@ describe("ChatGPT voice settings", () => {
   test("ignores an unsupported stored value", async () => {
     store.set("chatgpt-voice", "unsupported");
     expect(await readChatGPTVoice()).toBe(DEFAULT_CHATGPT_VOICE);
+  });
+
+  test("uses a neutral display name by default", async () => {
+    expect(await readDisplayName()).toBe(DEFAULT_DISPLAY_NAME);
+  });
+
+  test("trims and round-trips the user's display name", async () => {
+    await writeDisplayName("  Ada  ");
+    expect(await readDisplayName()).toBe("Ada");
+  });
+
+  test("falls back when the saved display name is blank", async () => {
+    store.set("display-name", "   ");
+    expect(await readDisplayName()).toBe(DEFAULT_DISPLAY_NAME);
   });
 });

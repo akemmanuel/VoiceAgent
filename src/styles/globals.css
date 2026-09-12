@@ -188,8 +188,23 @@
 .status-chip-active { border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); color: var(--primary); background: var(--brand-soft); }
 .status-chip-active > span { background: var(--primary); box-shadow: 0 0 0 3px var(--brand-soft); }
 
-.conversation-feed { background: color-mix(in srgb, var(--secondary) 72%, transparent); }
-.conversation-feed > p { animation: message-in 260ms ease-out both; }
+.transcript-panel {
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-strong) 72%, transparent);
+}
+
+.conversation-feed { background: color-mix(in srgb, var(--secondary) 58%, transparent); }
+.message-row { display: flex; flex-direction: column; animation: message-in 260ms ease-out both; }
+.message-user { align-items: flex-end; }
+.message-agent { align-items: flex-start; }
+.message-meta { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.3rem; color: var(--muted-foreground); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.025em; }
+.message-avatar { display: inline-flex; width: 1.25rem; height: 1.25rem; align-items: center; justify-content: center; border-radius: 9999px; }
+.message-avatar svg { width: 0.7rem; height: 0.7rem; }
+.message-avatar-user { background: var(--primary); color: var(--primary-foreground); }
+.message-avatar-agent { background: color-mix(in srgb, #8b5cf6 18%, var(--surface-strong)); color: #8b5cf6; }
+.message-bubble { max-width: 88%; padding: 0.55rem 0.7rem; box-shadow: 0 2px 7px rgb(16 35 33 / 5%); }
+.message-bubble-user { border-radius: 0.8rem 0.25rem 0.8rem 0.8rem; background: var(--primary); color: var(--primary-foreground); }
+.message-bubble-agent { border: 1px solid var(--border); border-radius: 0.25rem 0.8rem 0.8rem 0.8rem; background: var(--surface-strong); color: var(--foreground); }
 .send-button:not(:disabled) { box-shadow: 0 7px 16px color-mix(in srgb, var(--primary) 24%, transparent); }
 .tools-content, .notice-enter { animation: reveal 220ms ease-out both; transform-origin: top; }
 

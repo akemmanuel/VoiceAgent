@@ -4,6 +4,7 @@ import { WaveformIcon } from "@phosphor-icons/react";
 import { AccountSection } from "./account";
 import { EngineSection } from "./engine";
 import { OpenRouterSection } from "./openrouter";
+import { ProfileSection } from "./profile";
 import { VoiceConfigurationSection } from "./voice";
 
 function Options() {
@@ -27,6 +28,7 @@ function Options() {
         </div>
 
         <div className="grid gap-5">
+          <div className="settings-card"><ProfileSection /></div>
           <div className="settings-card"><EngineSection /></div>
           <div className="settings-card"><AccountSection /></div>
           <div className="settings-card"><OpenRouterSection /></div>
