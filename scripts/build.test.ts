@@ -5,9 +5,9 @@ const dist = new URL("../dist/", import.meta.url).pathname;
 const manifest = await Bun.file(join(dist, "manifest.json")).json();
 
 describe("built extension", () => {
-  test("uses MV3 with no requested permissions or content scripts", () => {
+  test("uses MV3 with narrowly scoped tab-control permissions", () => {
     expect(manifest.manifest_version).toBe(3);
-    expect(manifest.permissions ?? []).toEqual([]);
+    expect(manifest.permissions ?? []).toEqual(["activeTab", "scripting"]);
     expect(manifest.host_permissions ?? []).toEqual([]);
     expect(manifest.content_scripts ?? []).toEqual([]);
     expect(manifest.background.type).toBe("module");

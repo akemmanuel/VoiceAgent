@@ -50,6 +50,12 @@ scripts/
 
 The build copies HTML templates and public files into `dist/`, bundles JavaScript with Bun, and compiles Tailwind separately. HTML templates reference the resulting JavaScript and CSS files. The build deletes and recreates only `dist/`.
 
+## Browser tab tools
+
+Opening the popup grants VoiceAgent temporary access to the active tab. The **Read active tab** control extracts its visible text and a bounded list of interactive controls. The popup also exposes basic click, text-entry, and scroll actions through CSS selectors. The service worker injects these tools only into the tab the user activates; no sites have permanent host access. Browser-owned pages (for example `chrome://`) cannot be accessed, and password fields are never filled.
+
+ChatGPT should use these tools through the message types in `src/lib/tab-tools.ts` (`inspect-active-tab` and `act-on-active-tab`), rather than receiving direct browser API access.
+
 ## Responsibilities
 
 - **akemmanuel** — Builds the tool that lets the agent run arbitrary sandboxed JavaScript.
