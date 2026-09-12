@@ -10,8 +10,23 @@
 import type { AutomationProgram, AutomationResult, InteractiveElement, PageSnapshot, TabAction, TabToolResponse } from "@/lib/tab-tools";
 import type { ToolDefinition } from "@/live/openrouter/client";
 import { formatParsedTable, parseDelimitedText } from "./data-tools";
+import { formatParsedPdf, readPdfFromUrl } from "./pdf-tools";
 
 export const BROWSER_TOOLS: ToolDefinition[] = [
+  {
+    name: "read-pdf",
+    description: "Fetch a PDF from an http(s) URL and extract its text locally. Reads at most 20 MB, 40 pages, and 100000 characters. Use this to understand documents before answering or sorting them.",
+    parameters: { type: "object", properties: { url: { type: "string", description: "The PDF URL." } }, required: ["url"], additionalProperties: false },
+  },
+  {
+    name: "download-file",
+    description: "Download an http(s) URL into the browser download folder. Provide a relative filename such as Classroom/Math/week-03/worksheet.pdf to sort files. This never overwrites an existing file.",
+    parameters: {
+      type: "object",
+      properties: { url: { type: "string", description: "The file URL." }, filename: { type: "string", description: "Optional relative filename and folders." }, saveAs: { type: "boolean", description: "Whether the user should choose the final save location." } },
+      required: ["url"], additionalProperties: false,
+    },
+  },
   {
     name: "parse-csv",
     description: "Parse CSV or TSV text locally into rows and columns. Preserve values as text so IDs, leading zeros, and currency strings are not changed. The text is limited to 1 MB and 1000 rows.",
@@ -163,6 +178,24 @@ export async function executeBrowserTool(name: string, args: string): Promise<st
     if (value !== null && typeof value === "object" && !Array.isArray(value)) parsed = value as Record<string, unknown>;
   } catch {
     return "The arguments were not valid JSON. Call the tool again with valid arguments.";
+  }
+
+  if (name === "read-pdf") {
+    if (typeof parsed.url !== "string") return "read-pdf needs a PDF url.";
+    try { return formatParsedPdf(await readPdfFromUrl(parsed.url)); }
+    catch (cause) { return cause instanceof Error ? cause.message : "The PDF could not be read."; }
+  }
+
+  if (name === "download-file") {
+    if (typeof parsed.url !== "string") return "download-file needs a file url.";
+    try {
+      const url = new URL(parsed.url);
+      if (url.protocol !== "https:" && url.protocol !== "http:") return "Downloads must use http or https.";
+      const filename = typeof parsed.filename === "string" ? parsed.filename.replace(/\\/g, "/") : undefined;
+      if (filename && (filename.startsWith("/") || filename.split("/").some(part => part === ".." || !part))) return "The download filename must be a safe relative path.";
+      const id = await chrome.downloads.download({ url: url.href, ...(filename ? { filename } : {}), saveAs: parsed.saveAs === true, conflictAction: "uniquify" });
+      return `Started download ${id}${filename ? ` as ${filename}` : ""}.`;
+    } catch (cause) { return cause instanceof Error ? cause.message : "The download could not be started."; }
   }
 
   if (name === "parse-csv") {

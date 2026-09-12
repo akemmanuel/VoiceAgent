@@ -7,7 +7,7 @@ const manifest = await Bun.file(join(dist, "manifest.json")).json();
 describe("built extension", () => {
   test("uses MV3 with persistent browser access and strict privileged-page CSP", () => {
     expect(manifest.manifest_version).toBe(3);
-    expect(manifest.permissions ?? []).toEqual(["tabs", "scripting", "storage", "offscreen"]);
+    expect(manifest.permissions ?? []).toEqual(["tabs", "scripting", "storage", "offscreen", "downloads"]);
     expect(manifest.host_permissions ?? []).toEqual(["<all_urls>"]);
     expect(manifest.content_scripts ?? []).toEqual([]);
     expect(manifest.background.type).toBe("module");

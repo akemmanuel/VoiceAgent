@@ -4,6 +4,8 @@ import { BROWSER_TOOLS, formatSnapshot } from "./tab-tools";
 describe("browser tool contract", () => {
   test("exposes every observation, action, and bounded-automation entry point", () => {
     expect(BROWSER_TOOLS.map(tool => tool.name)).toEqual([
+      "read-pdf",
+      "download-file",
       "parse-csv",
       "inspect-active-tab",
       "capture-active-tab",

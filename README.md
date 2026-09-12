@@ -62,7 +62,9 @@ ChatGPT should use these tools through the message types in `src/lib/tab-tools.t
 
 For repetitive work, `run-automation` accepts a small declarative program with `click`, `type`, `select`, `check`, `scroll`, `wait`, `read`, and `for-each` steps. It runs only in the active tab, has no network or extension API access, is limited to 25 declared steps, 100 actions, 50 loop items, and 30 seconds, then returns a fresh page snapshot for the agent to verify. Buttons that look like final external actions are skipped rather than clicked.
 
-`parse-csv` reads pasted CSV or TSV text locally with Papa Parse. It preserves all values as text, so identifiers with leading zeroes and currency values are not silently converted. File selection, download, and PDF parsing are separate upcoming document tools.
+`parse-csv` reads pasted CSV or TSV text locally with Papa Parse. It preserves all values as text, so identifiers with leading zeroes and currency values are not silently converted. File selection and upload remain separate document tools.
+
+`read-pdf` fetches an http(s) PDF and extracts its text locally with PDF.js (up to 20 MB, 40 pages, and 100,000 characters). `download-file` saves an http(s) URL with a safe relative path such as `Classroom/Math/week-03/worksheet.pdf`; Chrome never overwrites an existing file.
 
 ### Browser-agent roadmap
 
