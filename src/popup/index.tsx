@@ -225,6 +225,11 @@ function Popup() {
             {VOICE_LABELS[voice.state]} · {voice.engine === "openrouter" ? "OpenRouter" : "ChatGPT"} engine
           </p>
         )}
+        {voice?.levels && (
+          <p className="mt-1 font-mono text-[11px] leading-4 text-muted-foreground">
+            mic {voice.levels.rms.toFixed(4)} · room {voice.levels.floor.toFixed(4)} · needs {voice.levels.onsetRms.toFixed(4)}
+          </p>
+        )}
         {voice?.transcript && <p className="mt-3 text-xs leading-5"><span className="font-semibold">You:</span> {voice.transcript}</p>}
         {voice?.reply && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Agent:</span> {voice.reply}</p>}
         {voice?.error && <p role="alert" className="mt-3 text-sm leading-5 text-destructive">{voice.error}</p>}

@@ -84,11 +84,12 @@ console.log(`   ${speechModelId} voice: ${voice}`);
 
 console.log("\n2. Detector against a synthetic utterance");
 {
-  const detector = new VoiceActivityDetector({ ...DEFAULT_VAD, frameMs: 50 });
+  const detector = new VoiceActivityDetector(DEFAULT_VAD);
   const events: string[] = [];
-  // Leading silence covers the calibration window, then a tone, then trailing silence.
-  // The envelope is fed through the real detector and the real RMS maths.
-  for (const [amplitude, frames] of [[0, 16], [0.3, 24], [0, 30]] as [number, number][]) {
+  // Leading silence lets the floor settle, then a tone, then trailing silence. The
+  // envelope is fed through the real detector and the real RMS maths, at the real
+  // frame interval.
+  for (const [amplitude, frames] of [[0, 8], [0.3, 12], [0, 15]] as [number, number][]) {
     for (let frame = 0; frame < frames; frame += 1) {
       const samples = new Float32Array(800);
       for (let index = 0; index < samples.length; index += 1) {

@@ -21,7 +21,7 @@ import { readChatGPTVoice, readEngine, type VoiceEngine } from "@/live/settings"
 import { bytesToBase64 } from "@/live/voice/audio-codec";
 import { isActive, reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "@/live/voice/conversation";
 import { readStoredConversation, storeConversation } from "@/live/voice/history";
-import type { OffscreenCommand, OffscreenEvent, VoiceRequest, VoiceStatus } from "@/live/voice/protocol";
+import type { OffscreenCommand, OffscreenEvent, VoiceLevels, VoiceRequest, VoiceStatus } from "@/live/voice/protocol";
 import { runTurn, systemMessage } from "@/live/voice/turn";
 import { BROWSER_TOOLS, executeBrowserTool } from "./tab-tools";
 
@@ -33,6 +33,7 @@ let engine: VoiceEngine = "chatgpt";
 let error: string | null = null;
 let transcript = "";
 let reply = "";
+let levels: VoiceLevels | null = null;
 let history: ChatMessage[] = [];
 let conversationLoaded = false;
 let turnAbort: AbortController | null = null;
@@ -46,7 +47,7 @@ function messageOf(cause: unknown, fallback: string): string {
 }
 
 function status(): VoiceStatus {
-  return { state, engine, transcript, reply, error };
+  return { state, engine, transcript, reply, error, levels };
 }
 
 async function loadConversation(): Promise<void> {
@@ -310,6 +311,9 @@ export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceSt
       sessionAbort = new AbortController();
       engine = await readEngine();
       await loadConversation();
+      // Telemetry only. The conversation itself is restored above, not reset, so
+      // starting a session continues the stored conversation.
+      levels = null;
       await broadcast();
       try {
         if (engine === "chatgpt") await getAccessToken();
@@ -371,6 +375,12 @@ export async function handleChatGPTMessage(message: Record<string, unknown>): Pr
 export async function handleOffscreenEvent(event: OffscreenEvent): Promise<void> {
   switch (event.type) {
     case "listening":
+      return;
+    case "levels":
+      // Deliberately not routed through the state machine: this is telemetry, not a
+      // conversation event, and it must not disturb turn-taking.
+      levels = { rms: event.rms, floor: event.floor, onsetRms: event.onsetRms };
+      await broadcast();
       return;
     case "speech-start":
       await dispatch({ type: "speech-start" });

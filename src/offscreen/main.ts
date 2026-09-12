@@ -12,7 +12,10 @@ import { DEFAULT_VAD, VoiceActivityDetector } from "@/live/voice/vad";
 import { isOffscreenCommand, type OffscreenCommand, type OffscreenEvent } from "@/live/voice/protocol";
 
 /** Analyzer cadence. The detector's thresholds are expressed in these units. */
-const FRAME_MS = 50;
+const FRAME_MS = 100;
+
+/** Frames between level reports to the worker, so the popup can show what the mic hears. */
+const LEVEL_REPORT_FRAMES = 5;
 
 const RECORDER_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
 
@@ -37,6 +40,7 @@ let chunks: Blob[] = [];
 let discardRecording = false;
 const playing = new Set<AudioBufferSourceNode>();
 let playbackEndedAt = Number.NEGATIVE_INFINITY;
+let framesSinceLevelReport = 0;
 
 function post(event: OffscreenEvent): void {
   void chrome.runtime.sendMessage(event).catch(() => {
@@ -66,10 +70,14 @@ async function startListening(): Promise<void> {
   const source = context.createMediaStreamSource(stream);
   analyser = context.createAnalyser();
   analyser.fftSize = 1024;
+  // Light smoothing, matching the production detector. The default of 0.8 adds so
+  // much inertia that a short word never reaches the onset level.
+  analyser.smoothingTimeConstant = 0.2;
   // Analysed only. Connecting to the destination would play the microphone back.
   source.connect(analyser);
 
   detector = new VoiceActivityDetector({ ...DEFAULT_VAD, frameMs: FRAME_MS });
+  framesSinceLevelReport = 0;
   timer = setInterval(onFrame, FRAME_MS);
   post({ source: "offscreen", type: "listening" });
 }
@@ -82,7 +90,18 @@ function onFrame(): void {
 
   const frame = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(frame);
-  const event = detector.push(rmsFromByteTimeDomain(frame));
+  const rms = rmsFromByteTimeDomain(frame);
+  const event = detector.push(rms);
+
+  // Reported even while quiet: this is the reading needed to tell a muted microphone
+  // from a noisy room, which otherwise looks identical from the outside.
+  framesSinceLevelReport += 1;
+  if (framesSinceLevelReport >= LEVEL_REPORT_FRAMES) {
+    framesSinceLevelReport = 0;
+    const { floor, onsetRms } = detector.thresholds();
+    post({ source: "offscreen", type: "levels", rms, floor, onsetRms });
+  }
+
   if (!event) return;
 
   if (event.type === "speech-start") {

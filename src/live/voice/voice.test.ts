@@ -12,11 +12,20 @@ const QUIET_BUT_VOICED = 0.015;
 const SILENT = 0;
 
 /**
- * Most tests care about the state machine, not about measuring a room, so they skip
- * calibration. The floor-tracking tests below build a detector with calibration on.
+ * Most tests care about the state machine, not about measuring a room, so they pin the
+ * floor by seeding it with a known first frame.
  */
 function detectorFor(overrides: Partial<typeof DEFAULT_VAD> = {}): VoiceActivityDetector {
-  return new VoiceActivityDetector({ ...DEFAULT_VAD, calibrationMs: 0, ...overrides });
+  const detector = new VoiceActivityDetector({ ...DEFAULT_VAD, ...overrides });
+  detector.recalibrate();
+  return detector;
+}
+
+/** Seeds the floor from a quiet frame, so thresholds are predictable in tests. */
+function seeded(overrides: Partial<typeof DEFAULT_VAD> = {}): VoiceActivityDetector {
+  const detector = detectorFor(overrides);
+  detector.push(0);
+  return detector;
 }
 
 describe("voice request protocol", () => {
@@ -38,7 +47,7 @@ function pushUntilEvent(detector: VoiceActivityDetector, level: number, limit = 
 
 describe("voice activity detection", () => {
   test("does not start an utterance for a click", () => {
-    const detector = detectorFor();
+    const detector = seeded();
     expect(detector.push(LOUD)).toBeNull();
     expect(pushUntilEvent(detector, SILENT, 30).event).toBeNull();
 
@@ -49,14 +58,16 @@ describe("voice activity detection", () => {
   });
 
   test("starts once speech has lasted the minimum duration", () => {
-    const detector = detectorFor();
+    const detector = seeded();
+    detector.reset();
     const { event, frames } = pushUntilEvent(detector, LOUD);
     expect(event?.type).toBe("speech-start");
-    expect(frames).toBe(DEFAULT_VAD.minSpeechMs / DEFAULT_VAD.frameMs);
+    expect(frames).toBe(Math.ceil(DEFAULT_VAD.minSpeechMs / DEFAULT_VAD.frameMs));
   });
 
   test("keeps an utterance alive through a quiet syllable", () => {
-    const detector = detectorFor();
+    const detector = seeded();
+    detector.reset();
     pushUntilEvent(detector, LOUD);
     // Above silenceRms but below speechRms: this is a pause mid-sentence, not the end.
     expect(pushUntilEvent(detector, QUIET_BUT_VOICED, 20).event).toBeNull();
@@ -64,7 +75,8 @@ describe("voice activity detection", () => {
   });
 
   test("ends an utterance after enough trailing silence and reports its length", () => {
-    const detector = detectorFor();
+    const detector = seeded();
+    detector.reset();
     pushUntilEvent(detector, LOUD);
     const { event } = pushUntilEvent(detector, SILENT);
     expect(event?.type).toBe("speech-end");
@@ -74,7 +86,8 @@ describe("voice activity detection", () => {
   });
 
   test("treats speech resuming inside the trailing window as the same utterance", () => {
-    const detector = detectorFor();
+    const detector = seeded();
+    detector.reset();
     pushUntilEvent(detector, LOUD);
     // Fewer silent frames than the hangover allows.
     for (let frame = 0; frame < DEFAULT_VAD.endSilenceMs / DEFAULT_VAD.frameMs - 2; frame += 1) {
@@ -86,7 +99,8 @@ describe("voice activity detection", () => {
   });
 
   test("reset clears an in-progress utterance", () => {
-    const detector = detectorFor();
+    const detector = seeded();
+    detector.reset();
     pushUntilEvent(detector, LOUD);
     detector.reset();
     expect(pushUntilEvent(detector, SILENT, 20).event).toBeNull();
@@ -103,59 +117,105 @@ describe("noise floor handling", () => {
     expect(rmsFromFloat(new Float32Array([0.4, 0.4, 0.4, 0.4]))).toBe(0);
   });
 
-  test("measures the room before listening, so a noisy floor is not speech", () => {
-    const detector = new VoiceActivityDetector({ ...DEFAULT_VAD, calibrationMs: 600 });
-    expect(detector.isCalibrating).toBe(true);
+  test("never declares speech in a room that sits between the two levels", () => {
+    // The reported bug. A room whose noise clears the stop level but never reaches the
+    // onset used to accumulate the onset duration anyway, so it produced an endless
+    // stream of false onsets, each opening a capture that nothing could close.
+    const detector = detectorFor();
+    detector.recalibrate();
+    detector.push(0.03); // a frame this loud seeds the floor, so the hold band is real
+    const { onsetRms, stopRms } = detector.thresholds();
+    expect(stopRms).toBeLessThan(onsetRms);
+    const between = (onsetRms + stopRms) / 2;
 
-    // A room idling at 0.03 would have tripped the old fixed threshold of 0.02.
-    for (let frame = 0; frame < 12; frame += 1) expect(detector.push(0.03)).toBeNull();
-    expect(detector.isCalibrating).toBe(false);
-    expect(detector.thresholds().floor).toBeCloseTo(0.03, 5);
-    expect(detector.thresholds().speechRms).toBeCloseTo(0.09, 5);
-
-    for (let frame = 0; frame < 40; frame += 1) expect(detector.push(0.03)).toBeNull();
-
-    // Real speech, well above the measured floor, still starts an utterance.
-    expect(pushUntilEvent(detector, 0.3).event?.type).toBe("speech-start");
+    for (let frame = 0; frame < 200; frame += 1) {
+      expect(detector.push(between)).toBeNull();
+    }
   });
 
-  test("follows a room that gets louder instead of triggering on it", () => {
-    const detector = new VoiceActivityDetector({ ...DEFAULT_VAD, calibrationMs: 600 });
-    for (let frame = 0; frame < 12; frame += 1) detector.push(0.002);
-    const before = detector.thresholds().speechRms;
+  test("still starts on speech that is clearly above the room", () => {
+    const detector = detectorFor();
+    detector.recalibrate();
+    detector.push(0.03);
+    const { onsetRms, stopRms } = detector.thresholds();
 
-    // Noise rises to just below the old threshold and stays there.
-    for (let frame = 0; frame < 60; frame += 1) expect(detector.push(0.018)).toBeNull();
-
-    expect(detector.thresholds().floor).toBeGreaterThan(0.01);
-    expect(detector.thresholds().speechRms).toBeGreaterThan(before);
+    // Room noise between the levels is ignored; speech well above the onset is not.
+    for (let frame = 0; frame < 20; frame += 1) expect(detector.push((onsetRms + stopRms) / 2)).toBeNull();
+    expect(pushUntilEvent(detector, 0.4).event?.type).toBe("speech-start");
   });
 
-  test("never learns speech as the new baseline", () => {
-    const detector = new VoiceActivityDetector({ ...DEFAULT_VAD, calibrationMs: 600 });
-    for (let frame = 0; frame < 12; frame += 1) detector.push(0.002);
-    const floorBefore = detector.thresholds().floor;
+  test("drops the floor quickly and lifts it slowly", () => {
+    const dropping = detectorFor();
+    dropping.recalibrate();
+    dropping.push(0.1);
+    const high = dropping.thresholds().floor;
 
-    // The floor only tracks from frames that are not speech, so talking cannot raise it.
-    for (let frame = 0; frame < 30; frame += 1) detector.push(0.3);
-    expect(detector.thresholds().floor).toBe(floorBefore);
+    // One quiet frame drops the floor by about a third, so a transient noise does not
+    // leave the detector deaf to normal speech afterwards.
+    dropping.push(0);
+    expect(dropping.thresholds().floor).toBeLessThan(high * 0.75);
+
+    // Rising is slow: five frames at a speech level must not climb anywhere near it,
+    // so one sentence cannot teach the detector that talking is the baseline.
+    const rising = seeded();
+    for (let frame = 0; frame < 5; frame += 1) rising.push(0.3);
+    expect(rising.thresholds().floor).toBeLessThan(0.02);
+  });
+
+  test("learns a room that genuinely gets louder, but not one long sentence", () => {
+    const louder = seeded();
+    for (let frame = 0; frame < 400; frame += 1) louder.push(0.05);
+    expect(louder.thresholds().floor).toBeGreaterThan(0.03);
+
+    // Speech lifts the floor far more slowly, so talking does not raise the bar.
+    const talking = seeded();
+    for (let frame = 0; frame < 30; frame += 1) talking.push(0.3);
+    expect(talking.thresholds().floor).toBeLessThan(0.05);
+  });
+
+  test("keeps the levels ordered however far the floor moves", () => {
+    const detector = seeded();
+    for (const level of [0, 0.005, 0.05, 0.2, 0.4]) {
+      for (let frame = 0; frame < 20; frame += 1) detector.push(level);
+      const { floor, onsetRms, stopRms } = detector.thresholds();
+      expect(floor).toBeGreaterThanOrEqual(DEFAULT_VAD.minFloorRms);
+      expect(floor).toBeLessThanOrEqual(DEFAULT_VAD.maxFloorRms);
+      expect(stopRms).toBeLessThanOrEqual(onsetRms);
+    }
   });
 
   test("cuts off a monologue so capture can never get stuck open", () => {
-    const detector = detectorFor({ maxUtteranceMs: 500 });
+    const detector = seeded({ maxUtteranceMs: 600 });
+    detector.reset();
     expect(pushUntilEvent(detector, LOUD).event?.type).toBe("speech-start");
-    // Continuous noise above the threshold used to hold the capture open forever.
+    // Continuous noise above the stop level used to hold the capture open forever.
     const { event } = pushUntilEvent(detector, LOUD);
     expect(event?.type).toBe("speech-end");
   });
 
-  test("recalibrate discards the learned floor", () => {
-    const detector = new VoiceActivityDetector({ ...DEFAULT_VAD, calibrationMs: 600 });
-    for (let frame = 0; frame < 12; frame += 1) detector.push(0.03);
-    expect(detector.thresholds().floor).toBeCloseTo(0.03, 5);
+  test("returns to idle when an onset stalls, so the floor keeps tracking", () => {
+    const detector = detectorFor({ stallMs: 400 });
     detector.recalibrate();
-    expect(detector.isCalibrating).toBe(true);
-    expect(detector.thresholds().floor).toBe(0);
+    detector.push(0.05);
+    const { onsetRms, stopRms } = detector.thresholds();
+
+    // A loud frame opens the onset window, then the room settles into the hold band.
+    expect(detector.push(0.4)).toBeNull();
+    for (let frame = 0; frame < 10; frame += 1) expect(detector.push((onsetRms + stopRms) / 2)).toBeNull();
+
+    // Back in idle, a genuinely loud frame can open a new onset window.
+    expect(pushUntilEvent(detector, 0.4).event?.type).toBe("speech-start");
+  });
+
+  test("recalibrate seeds the floor from the next frame", () => {
+    const detector = seeded();
+    detector.push(0.02);
+    expect(detector.thresholds().floor).toBeGreaterThan(DEFAULT_VAD.minFloorRms);
+
+    detector.recalibrate();
+    expect(detector.thresholds().floor).toBe(DEFAULT_VAD.minFloorRms);
+    detector.push(0.1);
+    expect(detector.thresholds().floor).toBeCloseTo(0.1, 5);
   });
 });
 

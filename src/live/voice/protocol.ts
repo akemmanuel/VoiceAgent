@@ -26,6 +26,8 @@ export type OffscreenEvent =
   | { source: "offscreen"; type: "speech-end" }
   | { source: "offscreen"; type: "utterance"; audioBase64: string; mimeType: string }
   | { source: "offscreen"; type: "playback-end" }
+  /** What the microphone currently hears, and the level speech must reach. */
+  | { source: "offscreen"; type: "levels"; rms: number; floor: number; onsetRms: number }
   | { source: "offscreen"; type: "failed"; message: string };
 
 export type VoiceRequest =
@@ -39,6 +41,8 @@ export type VoiceRequest =
 
 export type VoiceSettingsChangedMessage = { type: "voice-settings-changed" };
 
+export type VoiceLevels = { rms: number; floor: number; onsetRms: number };
+
 export type VoiceStatus = {
   state: ConversationState;
   /** Which engine the session is running, or would run. */
@@ -48,6 +52,8 @@ export type VoiceStatus = {
   /** Most recent reply, so the user can read what was spoken. */
   reply: string;
   error: string | null;
+  /** Live microphone reading, so a muted mic and a noisy room can be told apart. */
+  levels: VoiceLevels | null;
 };
 
 export type VoiceStatusMessage = { type: "voice-status-changed"; status: VoiceStatus };
