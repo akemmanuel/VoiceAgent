@@ -1,3 +1,4 @@
+import "./diagnostics";
 import type { TabToolRequest } from "@/lib/tab-tools";
 import { isOffscreenEvent, isVoiceRequest } from "@/live/voice/protocol";
 import { handleChatGPTMessage, handleOffscreenEvent, handleVoiceDebugReport, handleVoiceRequest, handleVoiceSettingsChanged } from "./live";
