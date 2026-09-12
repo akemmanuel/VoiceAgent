@@ -6,6 +6,15 @@ import { handleTabToolRequest } from "./tab-tools";
 
 const TAB_TOOL_TYPES = ["inspect-active-tab", "capture-active-tab", "wait-for-active-tab", "run-automation", "act-on-active-tab"];
 
+// Older builds configured the toolbar action to open Chrome's side panel. That
+// preference persists across extension updates, so explicitly clear it before
+// relying on action.default_popup again.
+if ("sidePanel" in chrome) {
+  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {
+    // The popup declared in the manifest remains the fallback.
+  });
+}
+
 // MV3 workers can be suspended when idle, so this listener is registered at
 // module scope and keeps no state of its own.
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
