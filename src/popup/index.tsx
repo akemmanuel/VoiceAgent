@@ -87,9 +87,11 @@ function Popup() {
         <div className="mt-4 grid gap-2">
           <input className="h-9 rounded-md border bg-background px-3 text-sm" value={selector} onChange={event => setSelector(event.target.value)} placeholder="CSS selector, e.g. button[type=submit]" aria-label="CSS selector" />
           <input className="h-9 rounded-md border bg-background px-3 text-sm" value={text} onChange={event => setText(event.target.value)} placeholder="Text to enter" aria-label="Text to enter" />
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <Button variant="secondary" onClick={() => act({ kind: "click", selector })} disabled={!selector}>Click</Button>
             <Button variant="secondary" onClick={() => act({ kind: "type", selector, text })} disabled={!selector}>Type</Button>
+            <Button variant="secondary" onClick={() => act({ kind: "highlight", selector, label: text || undefined })} disabled={!selector}>Highlight</Button>
+            <Button variant="secondary" onClick={() => act({ kind: "clear-highlights" })}>Clear highlight</Button>
             <Button variant="secondary" onClick={() => act({ kind: "scroll", deltaY: 600 })}>Scroll</Button>
           </div>
         </div>

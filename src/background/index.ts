@@ -77,6 +77,11 @@ function inspectPage(): PageSnapshot {
 }
 
 function performAction(action: TabAction): string {
+  if (action.kind === "clear-highlights") {
+    document.querySelectorAll("[data-voiceagent-highlight]").forEach(element => element.remove());
+    return "Cleared page highlights.";
+  }
+
   if (action.kind === "scroll") {
     window.scrollBy({ top: Math.max(-2000, Math.min(2000, action.deltaY)), behavior: "smooth" });
     return "Scrolled the page.";
@@ -84,6 +89,28 @@ function performAction(action: TabAction): string {
 
   const element = document.querySelector(action.selector);
   if (!element) throw new Error(`No element matches ${action.selector}.`);
+
+  if (action.kind === "highlight") {
+    document.querySelectorAll("[data-voiceagent-highlight]").forEach(existing => existing.remove());
+    const rect = element.getBoundingClientRect();
+    const overlay = document.createElement("div");
+    overlay.dataset.voiceagentHighlight = "true";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.style.cssText = [
+      "position:absolute", `top:${rect.top + window.scrollY - 4}px`, `left:${rect.left + window.scrollX - 4}px`,
+      `width:${rect.width + 8}px`, `height:${rect.height + 8}px`, "box-sizing:border-box", "pointer-events:none",
+      "z-index:2147483647", "border:3px solid #f59e0b", "border-radius:6px", "box-shadow:0 0 0 4px rgba(245,158,11,.28)",
+    ].join(";");
+    if (action.label) {
+      const label = document.createElement("span");
+      label.textContent = action.label.slice(0, 120);
+      label.style.cssText = "position:absolute;left:-3px;top:-30px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 8px;border-radius:4px;background:#92400e;color:#fff;font:600 13px system-ui,sans-serif;line-height:18px;box-shadow:0 1px 3px rgba(0,0,0,.25)";
+      overlay.append(label);
+    }
+    document.body.append(overlay);
+    element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    return "Highlighted the selected element.";
+  }
 
   if (action.kind === "click") {
     (element as HTMLElement).click();

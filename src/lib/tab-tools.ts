@@ -1,7 +1,9 @@
 export type TabAction =
   | { kind: "click"; selector: string }
   | { kind: "type"; selector: string; text: string }
-  | { kind: "scroll"; deltaY: number };
+  | { kind: "scroll"; deltaY: number }
+  | { kind: "highlight"; selector: string; label?: string }
+  | { kind: "clear-highlights" };
 
 export type InteractiveElement = {
   selector: string;
