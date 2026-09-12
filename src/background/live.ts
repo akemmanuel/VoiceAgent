@@ -10,13 +10,15 @@
  * worker means the microphone is gone anyway, so the session is over.
  */
 
+import { getAccessToken } from "@/live/auth/credentials";
+import { negotiateCall } from "@/live/chatgpt/call";
 import type { ChatMessage } from "@/live/openrouter/client";
 import { createChatCompletion, createSpeech, createTranscription } from "@/live/openrouter/client";
 import { fetchSpeechModels, type CatalogModel } from "@/live/openrouter/catalog";
 import { effectiveVoice, readOpenRouterSettings, reasoningOption } from "@/live/openrouter/settings";
 import { readEngine, type VoiceEngine } from "@/live/settings";
 import { bytesToBase64 } from "@/live/voice/audio-codec";
-import { reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "@/live/voice/conversation";
+import { isActive, reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "@/live/voice/conversation";
 import type { OffscreenCommand, OffscreenEvent, VoiceRequest, VoiceStatus } from "@/live/voice/protocol";
 import { runTurn, systemMessage } from "@/live/voice/turn";
 import { BROWSER_TOOLS, executeBrowserTool } from "./tab-tools";
@@ -30,6 +32,8 @@ let transcript = "";
 let reply = "";
 let history: ChatMessage[] = [];
 let turnAbort: AbortController | null = null;
+let sessionId: string | null = null;
+let sessionAbort: AbortController | null = null;
 /** The catalog is stable for a session and public, so it is fetched once. */
 let speechModels: CatalogModel[] | null = null;
 
@@ -51,9 +55,10 @@ async function broadcast(): Promise<void> {
 
 async function sendToOffscreen(command: OffscreenCommand): Promise<void> {
   try {
-    await chrome.runtime.sendMessage(command);
-  } catch {
-    // The document is closed or closing; the session ends either way.
+    const response = await chrome.runtime.sendMessage(command);
+    if (!response?.ok) throw new Error(response?.error ?? "The audio document did not respond.");
+  } catch (cause) {
+    if (command.type !== "release") throw cause;
   }
 }
 
@@ -155,7 +160,10 @@ async function applyAction(action: VoiceAction): Promise<void> {
       // nothing to command here; this action marks intent in the transcript.
       return;
     case "capture-stop":
-      await sendToOffscreen({ target: "offscreen", type: "discard-recording" });
+      // No-op: the offscreen document already stopped the recorder when it
+      // detected speech-end, and the utterance blob is on its way. Sending
+      // discard-recording here would drop the audio we want to transcribe.
+      // Teardown still releases the microphone via `release`, which discards.
       return;
     case "run-turn":
       // Not awaited: the reducer must stay responsive so barge-in can cancel it.
@@ -175,6 +183,9 @@ async function applyAction(action: VoiceAction): Promise<void> {
       turnAbort?.abort();
       return;
     case "release":
+      sessionId = null;
+      sessionAbort?.abort();
+      sessionAbort = null;
       await sendToOffscreen({ target: "offscreen", type: "release" });
       if (await chrome.offscreen.hasDocument()) await chrome.offscreen.closeDocument();
       return;
@@ -182,6 +193,9 @@ async function applyAction(action: VoiceAction): Promise<void> {
 }
 
 async function dispatch(event: VoiceEvent): Promise<void> {
+  // Keep the popup's transcript visible: the reducer only decides state.
+  if (event.type === "transcript") transcript = event.text.trim();
+  if (event.type === "turn-complete") reply = event.reply.trim();
   const transition = reduce(state, event);
   state = transition.state;
   error = transition.error;
@@ -195,22 +209,32 @@ export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceSt
       return status();
 
     case "voice-start": {
+      if (isActive(state)) return status();
+      state = "connecting";
+      error = null;
+      const id = crypto.randomUUID();
+      sessionId = id;
+      sessionAbort = new AbortController();
       engine = await readEngine();
       history = [];
       transcript = "";
       reply = "";
-      if (engine === "chatgpt") {
-        // Honest failure rather than a silent no-op: this engine has no audio path yet.
-        await dispatch({ type: "start" });
-        await dispatch({ type: "failed", message: "The ChatGPT engine cannot hold a spoken conversation yet. Choose the OpenRouter engine in settings." });
-        return status();
-      }
+      await broadcast();
       try {
+        if (engine === "chatgpt") await getAccessToken();
+        else if (!(await readOpenRouterSettings()).apiKey) throw new Error("Add an OpenRouter key in settings before starting a voice session.");
+        if (sessionId !== id) return status();
         await ensureOffscreen();
-        await sendToOffscreen({ target: "offscreen", type: "listen" });
-        await dispatch({ type: "start" });
+        if (sessionId !== id) {
+          if (await chrome.offscreen.hasDocument()) await chrome.offscreen.closeDocument();
+          return status();
+        }
+        await sendToOffscreen(engine === "chatgpt"
+          ? { target: "offscreen", type: "chatgpt-start", sessionId: id }
+          : { target: "offscreen", type: "listen" });
+        if (sessionId === id) await dispatch({ type: "start" });
       } catch (cause) {
-        await dispatch({ type: "failed", message: messageOf(cause, "The microphone could not be opened.") });
+        if (sessionId === id) await dispatch({ type: "failed", message: messageOf(cause, "The microphone could not be opened.") });
       }
       return status();
     }
@@ -221,6 +245,32 @@ export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceSt
   }
 }
 
+/** Called only for messages from our own offscreen document. */
+export async function handleChatGPTMessage(message: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const id = sessionId;
+  if (!id || message.sessionId !== id || engine !== "chatgpt") return { ok: false, error: "Voice session ended." };
+  try {
+    if (message.type === "chatgpt-offer") {
+      if (typeof message.sdp !== "string" || message.sdp.length > 100_000) throw new Error("Invalid voice offer.");
+      const signal = AbortSignal.any([sessionAbort!.signal, AbortSignal.timeout(30_000)]);
+      const credentials = await getAccessToken();
+      signal.throwIfAborted();
+      const answer = await negotiateCall(message.sdp, credentials, signal);
+      return sessionId === id ? { ok: true, answer } : { ok: false, error: "Voice session ended." };
+    }
+    if (message.kind === "failed") {
+      await dispatch({ type: "failed", message: typeof message.message === "string" ? message.message : "ChatGPT voice disconnected." });
+    } else if (message.kind === "transcript" && typeof message.text === "string") {
+      if (message.role === "user") transcript = message.text;
+      if (message.role === "assistant") reply = message.text;
+      await broadcast();
+    }
+    return { ok: true };
+  } catch (cause) {
+    return { ok: false, error: messageOf(cause, "ChatGPT voice negotiation failed.") };
+  }
+}
+
 export async function handleOffscreenEvent(event: OffscreenEvent): Promise<void> {
   switch (event.type) {
     case "listening":
@@ -228,8 +278,15 @@ export async function handleOffscreenEvent(event: OffscreenEvent): Promise<void>
     case "speech-start":
       await dispatch({ type: "speech-start" });
       return;
+    case "speech-end":
+      await dispatch({ type: "speech-end" });
+      return;
     case "utterance":
       try {
+        // Defensive: the utterance blob resolves async after speech-end was
+        // posted, but if the message was lost the state is still capturing
+        // and the transcript would be dropped. Advance first.
+        if (state === "capturing") await dispatch({ type: "speech-end" });
         await transcribeUtterance(event.audioBase64, event.mimeType);
       } catch (cause) {
         await dispatch({ type: "failed", message: messageOf(cause, "The recording could not be transcribed.") });

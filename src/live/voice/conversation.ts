@@ -6,7 +6,7 @@
  * handed. That keeps turn-taking testable without a microphone.
  */
 
-export type ConversationState = "idle" | "listening" | "capturing" | "transcribing" | "thinking" | "speaking" | "failed";
+export type ConversationState = "idle" | "connecting" | "listening" | "capturing" | "transcribing" | "thinking" | "speaking" | "failed";
 
 export type VoiceEvent =
   | { type: "start" }
@@ -37,7 +37,7 @@ export type VoiceTransition = {
   error: string | null;
 };
 
-const ACTIVE: ConversationState[] = ["capturing", "transcribing", "thinking", "speaking"];
+const ACTIVE: ConversationState[] = ["connecting", "listening", "capturing", "transcribing", "thinking", "speaking"];
 
 export function isActive(state: ConversationState): boolean {
   return ACTIVE.includes(state);

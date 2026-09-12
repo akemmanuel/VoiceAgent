@@ -4,6 +4,9 @@
  * The extension authenticates as Codex's public OAuth client. Public clients hold
  * no secret, so the device flow (or PKCE) is what authorizes a request; there is
  * no API key anywhere in this module.
+ *
+ * Tokens can also be pasted manually (see parsePastedTokens), in which case no
+ * OAuth flow runs at all and the refresh token is optional.
  */
 
 export const AUTH_ISSUER = "https://auth.openai.com";
@@ -26,9 +29,14 @@ const TOKEN_ENDPOINT = `${AUTH_ISSUER}/oauth/token`;
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export type TokenSet = {
-  idToken: string;
+  /** Null when the user pasted only an access token; display claims are then unknown. */
+  idToken: string | null;
   accessToken: string;
-  refreshToken: string;
+  /**
+   * Null when the server omitted it or the user never pasted one. The session
+   * still works until the access token expires; it just cannot be refreshed.
+   */
+  refreshToken: string | null;
 };
 
 /**
@@ -161,7 +169,12 @@ async function postTokenRequest(body: Record<string, string>, fetchImpl: FetchLi
   return { idToken, accessToken, refreshToken: asString(tokens.refresh_token) };
 }
 
-/** Exchanges the device flow's authorization code, which arrives with its own PKCE verifier. */
+/**
+ * Exchanges the device flow's authorization code, which arrives with its own PKCE verifier.
+ *
+ * A missing refresh token is kept as null rather than failing: the session works
+ * until the access token expires, and getAccessToken reports that distinctly.
+ */
 export async function exchangeAuthorizationCode(
   code: string,
   codeVerifier: string,
@@ -177,9 +190,6 @@ export async function exchangeAuthorizationCode(
     },
     fetchImpl,
   );
-  if (!tokens.refreshToken) {
-    throw new AuthError("The sign-in response did not include a refresh token.", "incomplete_token_response");
-  }
   return { idToken: tokens.idToken, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken };
 }
 
@@ -196,5 +206,54 @@ export async function refreshTokenSet(refreshToken: string, fetchImpl: FetchLike
     idToken: tokens.idToken,
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken ?? refreshToken,
+  };
+}
+
+/**
+ * Parses tokens the user pasted manually, so a subscription can be used with no
+ * OAuth flow at all. Accepts:
+ *
+ * - a Codex-style auth file (`{"tokens": {"id_token": ..., "access_token": ..., "refresh_token": ...}}`),
+ * - a bare token object (`{"id_token": ..., "access_token": ...}`),
+ * - a raw access token pasted on its own.
+ *
+ * Snake_case and camelCase keys both work, and surrounding whitespace is ignored.
+ * Only the access token is required. Without an id token the account display
+ * stays blank, and without a refresh token the session works until the access
+ * token expires — then the user simply pastes fresh tokens.
+ */
+export function parsePastedTokens(input: string): TokenSet {
+  const trimmed = input.trim();
+  if (!trimmed) throw new AuthError("Paste your tokens first.", "empty_paste");
+  if (!trimmed.startsWith("{")) {
+    // A raw token on its own is treated as the access token.
+    return { idToken: null, accessToken: trimmed, refreshToken: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new AuthError("That is not valid JSON or a token. Paste the JSON object or the access token itself.", "malformed_paste");
+  }
+  const container = (parsed as { tokens?: unknown })?.tokens ?? parsed;
+  if (typeof container !== "object" || container === null) {
+    throw new AuthError("The pasted JSON has no access_token. Paste the full tokens object.", "incomplete_paste");
+  }
+  const record = container as Record<string, unknown>;
+  const pick = (...keys: string[]): string | null => {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim().length > 0) return value.trim();
+    }
+    return null;
+  };
+  const accessToken = pick("access_token", "accessToken");
+  if (!accessToken) {
+    throw new AuthError("The pasted JSON has no access_token. Paste the full tokens object.", "incomplete_paste");
+  }
+  return {
+    idToken: pick("id_token", "idToken"),
+    accessToken,
+    refreshToken: pick("refresh_token", "refreshToken"),
   };
 }

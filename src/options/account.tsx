@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { clearCredentials, readCredentials, saveCredentials, type Credentials } from "@/live/auth/credentials";
 import { awaitDeviceAuthorization, requestDeviceAuthorization, type DeviceAuthorization } from "@/live/auth/device";
-import { AuthError, DEVICE_VERIFICATION_URL } from "@/live/auth/oauth";
+import { AuthError, DEVICE_VERIFICATION_URL, parsePastedTokens } from "@/live/auth/oauth";
 
 type Phase = "loading" | "signed-out" | "requesting" | "waiting" | "signed-in";
 
@@ -21,6 +21,8 @@ export function AccountSection() {
   const [device, setDevice] = useState<DeviceAuthorization | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [paste, setPaste] = useState("");
+  const [pasteSaved, setPasteSaved] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -83,13 +85,26 @@ export function AccountSection() {
     }
   }
 
+  async function savePasted() {
+    setError(null);
+    setPasteSaved(false);
+    try {
+      setCredentials(await saveCredentials(parsePastedTokens(paste)));
+      setPaste("");
+      setPasteSaved(true);
+      setPhase("signed-in");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Those tokens could not be saved.");
+    }
+  }
+
   return (
     <section aria-labelledby="account-title">
       <h2 id="account-title" className="text-lg font-semibold">
         ChatGPT account
       </h2>
       <p className="mt-3 max-w-prose text-sm leading-6 text-muted-foreground">
-        VoiceAgent talks to GPT-Live through your ChatGPT subscription. It signs in with a one-time code, so there is no API key to paste and no password to store.
+        VoiceAgent talks to GPT-Live through your ChatGPT subscription. Sign in with a one-time code, or paste your tokens manually below — no OAuth flow needed, and no refresh token required.
       </p>
 
       <div className="mt-5">
@@ -148,6 +163,11 @@ export function AccountSection() {
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
               Voice sessions bill to this account and count against its concurrent-session limit.
             </p>
+            {!credentials.refreshToken && (
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                No refresh token is saved, so this works until the access token expires — then paste fresh tokens below.
+              </p>
+            )}
             <Button variant="secondary" size="sm" className="mt-4" onClick={() => void signOut()}>
               <SignOutIcon aria-hidden="true" />
               Sign out
@@ -160,6 +180,36 @@ export function AccountSection() {
             <WarningCircleIcon className="mt-0.5 shrink-0" aria-hidden="true" />
             {error}
           </p>
+        )}
+
+        {(phase === "signed-out" || phase === "signed-in") && (
+          <div className="mt-5 rounded-lg border border-border p-4">
+            <label htmlFor="chatgpt-paste" className="block text-sm font-medium">
+              Or paste tokens manually
+            </label>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Paste the tokens object (for example your Codex <code className="font-mono">auth.json</code> contents) or just the access token itself. The refresh token is optional.
+            </p>
+            <textarea
+              id="chatgpt-paste"
+              rows={3}
+              autoComplete="off"
+              spellCheck={false}
+              value={paste}
+              onChange={event => {
+                setPaste(event.target.value);
+                setPasteSaved(false);
+              }}
+              placeholder='{"id_token": "…", "access_token": "…", "refresh_token": "…"}'
+              className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+            />
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <Button variant="secondary" size="sm" onClick={() => void savePasted()} disabled={paste.trim().length === 0}>
+                {pasteSaved ? <CheckCircleIcon aria-hidden="true" /> : null}
+                {pasteSaved ? "Saved" : "Save pasted tokens"}
+              </Button>
+            </div>
+          </div>
         )}
       </div>
     </section>

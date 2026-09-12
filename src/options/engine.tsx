@@ -6,7 +6,7 @@ const OPTIONS: { value: VoiceEngine; title: string; description: string; Icon: t
   {
     value: "chatgpt",
     title: "ChatGPT subscription",
-    description: "GPT-Live speech-to-speech over one session. Needs a paid ChatGPT plan; there is no API key.",
+    description: "GPT-Live speech-to-speech over one session. Needs a paid ChatGPT plan; sign in with a code or paste tokens.",
     Icon: RobotIcon,
   },
   {

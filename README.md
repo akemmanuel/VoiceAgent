@@ -74,9 +74,11 @@ Implemented model tools are: inspection, visible-tab capture, dynamic waiting, b
 
 The settings page signs in to ChatGPT with a device code, so VoiceAgent needs no API key. Open settings, choose **Sign in with ChatGPT**, and a sign-in page opens with a one-time code shown in the panel. Approving it stores the tokens in `chrome.storage.local` and the panel switches to the signed-in account.
 
+No OAuth flow is needed either: the same panel accepts pasted tokens. Paste the tokens object (for example the contents of a Codex `auth.json`) or just the access token itself into **Or paste tokens manually** and save. Only the access token is required — without an id token the account display stays blank, and without a refresh token the session works until the access token expires, then you paste fresh tokens.
+
 This uses OpenAI's device authorization flow, which exists for clients that cannot receive a browser redirect. The alternative for third-party clients would be a localhost callback, which an extension cannot host. The manifest's broad host access includes `auth.openai.com`; the `storage` permission supports token persistence.
 
-Sign-in and refresh live in `src/live/auth/`. The access token is refreshed shortly before it expires. Because the extension drives Codex's public OAuth client from outside Codex, voice sessions bill to the signed-in account and count against its concurrent-session limit.
+Sign-in, pasting (`parsePastedTokens`), and refresh live in `src/live/auth/`. The access token is refreshed shortly before it expires when a refresh token exists; refresh-less credentials are used as-is and report `token_expired_no_refresh` once stale. Because the extension drives Codex's public OAuth client from outside Codex, voice sessions bill to the signed-in account and count against its concurrent-session limit.
 
 ## OpenRouter engine
 

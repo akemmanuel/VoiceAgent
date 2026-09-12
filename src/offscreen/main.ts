@@ -6,6 +6,7 @@
  * boundaries and plays audio, and the worker decides what any of it means.
  */
 
+import { ChatGPTCall } from "./chatgpt";
 import { rmsFromByteTimeDomain, bytesToBase64 } from "@/live/voice/audio-codec";
 import { DEFAULT_VAD, VoiceActivityDetector } from "@/live/voice/vad";
 import { isOffscreenCommand, type OffscreenCommand, type OffscreenEvent } from "@/live/voice/protocol";
@@ -15,6 +16,7 @@ const FRAME_MS = 50;
 
 const RECORDER_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
 
+let liveCall: ChatGPTCall | null = null;
 let stream: MediaStream | null = null;
 let context: AudioContext | null = null;
 let analyser: AnalyserNode | null = null;
@@ -69,7 +71,11 @@ function onFrame(): void {
     post({ source: "offscreen", type: "speech-start" });
     return;
   }
+  // speech-end: the recorder already holds the utterance, so stop locally but
+  // keep the audio. The worker moves to transcribing and the pending blob
+  // arrives next as an utterance.
   stopRecording();
+  post({ source: "offscreen", type: "speech-end" });
 }
 
 function startRecording(): void {
@@ -146,6 +152,8 @@ async function play(audioBase64: string): Promise<void> {
 }
 
 async function release(): Promise<void> {
+  liveCall?.close();
+  liveCall = null;
   stopPlayback();
   if (timer !== null) {
     clearInterval(timer);
@@ -166,6 +174,13 @@ async function release(): Promise<void> {
 
 async function handleCommand(command: OffscreenCommand): Promise<void> {
   switch (command.type) {
+    case "chatgpt-start": {
+      await release();
+      const call = new ChatGPTCall(command.sessionId);
+      liveCall = call;
+      await call.start();
+      return;
+    }
     case "listen":
       await startListening();
       return;
@@ -192,7 +207,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
     (cause: unknown) => {
       const reason = cause instanceof Error ? cause.message : "The audio device failed.";
       // A denied microphone permission arrives here, and the session has to know.
-      post({ source: "offscreen", type: "failed", message: reason });
+      if (message.type !== "chatgpt-start" && message.type !== "listen") post({ source: "offscreen", type: "failed", message: reason });
       sendResponse({ ok: false, error: reason });
     },
   );

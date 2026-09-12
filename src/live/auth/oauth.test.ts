@@ -7,6 +7,7 @@ import {
   decodeJwtPayload,
   exchangeAuthorizationCode,
   isAccessTokenFresh,
+  parsePastedTokens,
   readAccessTokenExpiry,
   readAuthError,
   readClaims,
@@ -132,6 +133,53 @@ describe("token endpoint calls", () => {
     await expect(exchangeAuthorizationCode("code", "verifier", async () => jsonResponse({ access_token: "access" }))).rejects.toHaveProperty(
       "code",
       "incomplete_token_response",
+    );
+  });
+
+  test("succeeds without a refresh token, keeping it null", async () => {
+    const tokens = await exchangeAuthorizationCode("code", "verifier", async () =>
+      jsonResponse({ id_token: "id", access_token: "access" }),
+    );
+    expect(tokens).toEqual({ idToken: "id", accessToken: "access", refreshToken: null });
+  });
+});
+
+describe("parsePastedTokens", () => {
+  test("reads a Codex-style auth file with a nested tokens object", () => {
+    expect(
+      parsePastedTokens(JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh" } })),
+    ).toEqual({ idToken: "id", accessToken: "access", refreshToken: "refresh" });
+  });
+
+  test("reads a bare token object and tolerates camelCase and whitespace", () => {
+    expect(parsePastedTokens(`  { "idToken": "  id  ", "accessToken": "access" }  `)).toEqual({
+      idToken: "id",
+      accessToken: "access",
+      refreshToken: null,
+    });
+  });
+
+  test("works without a refresh token", () => {
+    expect(parsePastedTokens(JSON.stringify({ id_token: "id", access_token: "access" }))).toEqual({
+      idToken: "id",
+      accessToken: "access",
+      refreshToken: null,
+    });
+  });
+
+  test("treats a raw token on its own as the access token", () => {
+    expect(parsePastedTokens("  eyJhbGciOiJSUzI1NiJ9.eyJleHAiOjF9.c2ln  ")).toEqual({
+      idToken: null,
+      accessToken: "eyJhbGciOiJSUzI1NiJ9.eyJleHAiOjF9.c2ln",
+      refreshToken: null,
+    });
+  });
+
+  test("rejects empty input, invalid JSON, and JSON without an access token", () => {
+    expect(() => parsePastedTokens("   ")).toThrow(expect.objectContaining({ code: "empty_paste" }));
+    expect(() => parsePastedTokens("{nope")).toThrow(expect.objectContaining({ code: "malformed_paste" }));
+    expect(() => parsePastedTokens(JSON.stringify({ id_token: "id" }))).toThrow(
+      expect.objectContaining({ code: "incomplete_paste" }),
     );
   });
 });

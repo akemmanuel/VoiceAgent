@@ -9,6 +9,7 @@ import type { VoiceStatus, VoiceStatusMessage } from "@/live/voice/protocol";
 
 const VOICE_LABELS: Record<ConversationState, string> = {
   idle: "Not listening",
+  connecting: "Connecting…",
   listening: "Listening…",
   capturing: "Hearing you…",
   transcribing: "Transcribing…",
@@ -59,10 +60,31 @@ function Popup() {
   async function toggleVoice() {
     setBusy(true);
     setError(null);
-    const next = await sendVoice({ type: voice && isActive(voice.state) ? "voice-stop" : "voice-start" });
-    setBusy(false);
-    if (next) setVoice(next);
-    else setError("The voice session could not be reached. Try reopening the popup.");
+    try {
+      const stopping = voice && isActive(voice.state);
+      if (!stopping) {
+        const permission = await navigator.permissions.query({ name: "microphone" as PermissionName });
+        if (permission.state !== "granted") {
+          if (!new URLSearchParams(location.search).has("microphone")) {
+            await chrome.tabs.create({ url: chrome.runtime.getURL("popup/index.html?microphone=1") });
+            return;
+          }
+          // Offscreen documents cannot show permission prompts. Request once in
+          // this visible extension tab, then let the audio document own capture.
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach(track => track.stop());
+        }
+      }
+      const next = await sendVoice({ type: stopping ? "voice-stop" : "voice-start" });
+      if (next) setVoice(next);
+      else setError("The voice session could not be reached. Try reopening the popup.");
+    } catch (cause) {
+      setError(cause instanceof DOMException && cause.name === "NotAllowedError"
+        ? "Microphone access is blocked. Allow the microphone in this tab's site settings, then retry."
+        : cause instanceof Error ? cause.message : "The voice session could not start.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function openSettings() {
@@ -107,6 +129,7 @@ function Popup() {
         <WaveformIcon size={26} weight="bold" className="text-primary" aria-hidden="true" />
         <h1 className="text-lg font-semibold tracking-tight">VoiceAgent</h1>
       </header>
+      {new URLSearchParams(location.search).has("microphone") && <p role="status" className="mt-4 text-sm leading-6">Click Start voice session below, then allow microphone access. Audio is sent to the selected voice provider while the session runs. You can close this tab after connecting.</p>}
       <Separator className="my-6" />
       <section aria-labelledby="starter-title">
         <h2 id="starter-title" className="text-2xl font-semibold tracking-tight">Browser tools</h2>

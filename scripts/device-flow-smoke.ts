@@ -25,10 +25,10 @@ const tokens = await awaitDeviceAuthorization(authorization, {
   },
 });
 
-const claims = readClaims(tokens.idToken);
+const claims = tokens.idToken ? readClaims(tokens.idToken) : null;
 console.log(`\n\nSigned in after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
-console.log(`  email:      ${claims.email ?? "(none)"}`);
-console.log(`  plan:       ${claims.planType ?? "(none)"}`);
-console.log(`  account id: ${claims.accountId ?? "(none)"}`);
-console.log(`  user id:    ${claims.userId ?? "(none)"}`);
-console.log(`  tokens:     access ${tokens.accessToken.length}B, refresh ${tokens.refreshToken.length}B`);
+console.log(`  email:      ${claims?.email ?? "(none)"}`);
+console.log(`  plan:       ${claims?.planType ?? "(none)"}`);
+console.log(`  account id: ${claims?.accountId ?? "(none)"}`);
+console.log(`  user id:    ${claims?.userId ?? "(none)"}`);
+console.log(`  tokens:     access ${tokens.accessToken.length}B, refresh ${tokens.refreshToken ? `${tokens.refreshToken.length}B` : "(none)"}`);

@@ -9,6 +9,7 @@ import type { ConversationState } from "@/live/voice/conversation";
 
 /** Worker to offscreen document. */
 export type OffscreenCommand =
+  | { target: "offscreen"; type: "chatgpt-start"; sessionId: string }
   | { target: "offscreen"; type: "listen" }
   /** Abandon the recording in progress without transcribing it. */
   | { target: "offscreen"; type: "discard-recording" }
@@ -21,6 +22,7 @@ export type OffscreenCommand =
 export type OffscreenEvent =
   | { source: "offscreen"; type: "listening" }
   | { source: "offscreen"; type: "speech-start" }
+  | { source: "offscreen"; type: "speech-end" }
   | { source: "offscreen"; type: "utterance"; audioBase64: string; mimeType: string }
   | { source: "offscreen"; type: "playback-end" }
   | { source: "offscreen"; type: "failed"; message: string };

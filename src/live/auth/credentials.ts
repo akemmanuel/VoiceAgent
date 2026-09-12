@@ -3,6 +3,9 @@
  *
  * Tokens live in `chrome.storage.local`, which is extension-private. The service
  * worker can be suspended at any time, so nothing here is cached in module state.
+ *
+ * Credentials work without a refresh token: a pasted access token is used as-is
+ * until it expires, and only then is the user asked to paste fresh tokens.
  */
 
 import {
@@ -31,23 +34,23 @@ function asString(value: unknown): string | null {
 
 export async function readCredentials(): Promise<Credentials | null> {
   const stored = (await chrome.storage.local.get(STORAGE_KEY))[STORAGE_KEY] as Record<string, unknown> | undefined;
-  const idToken = asString(stored?.idToken);
+  // Only the access token is required. Pasted credentials may have no id token
+  // (account display stays blank) and no refresh token (no silent refresh).
   const accessToken = asString(stored?.accessToken);
-  const refreshToken = asString(stored?.refreshToken);
-  if (!idToken || !accessToken || !refreshToken) return null;
+  if (!accessToken) return null;
   return {
-    idToken,
+    idToken: asString(stored?.idToken),
     accessToken,
-    refreshToken,
+    refreshToken: asString(stored?.refreshToken),
     accountId: asString(stored?.accountId),
     email: asString(stored?.email),
     planType: asString(stored?.planType),
   };
 }
 
-/** Stores a token set and derives the display claims from its id token. */
+/** Stores a token set and derives the display claims from its id token, when it has one. */
 export async function saveCredentials(tokens: TokenSet): Promise<Credentials> {
-  const claims = readClaims(tokens.idToken);
+  const claims = tokens.idToken ? readClaims(tokens.idToken) : { accountId: null, email: null, planType: null };
   const credentials: Credentials = {
     ...tokens,
     accountId: claims.accountId,
@@ -62,12 +65,24 @@ export async function clearCredentials(): Promise<void> {
   await chrome.storage.local.remove(STORAGE_KEY);
 }
 
-/** Reads a usable access token, refreshing it first when it is close to expiry. */
+/**
+ * Reads a usable access token, refreshing it first when it is close to expiry.
+ *
+ * Credentials without a refresh token are returned as-is while fresh. Once they
+ * expire there is nothing to refresh with, so a distinct error tells the user to
+ * paste fresh tokens instead of retrying forever.
+ */
 export async function getAccessToken(fetchImpl: FetchLike = fetch): Promise<{ accessToken: string; accountId: string | null }> {
   const credentials = await readCredentials();
   if (!credentials) throw new AuthError("Not signed in to ChatGPT.", "not_signed_in");
   if (isAccessTokenFresh(credentials.accessToken)) {
     return { accessToken: credentials.accessToken, accountId: credentials.accountId };
+  }
+  if (!credentials.refreshToken) {
+    throw new AuthError(
+      "The saved access token expired and there is no refresh token. Paste fresh tokens in settings to keep going.",
+      "token_expired_no_refresh",
+    );
   }
 
   try {
