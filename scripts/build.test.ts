@@ -8,7 +8,7 @@ describe("built extension", () => {
   test("uses MV3 with narrowly scoped permissions", () => {
     expect(manifest.manifest_version).toBe(3);
     expect(manifest.permissions ?? []).toEqual(["activeTab", "scripting", "storage"]);
-    expect(manifest.host_permissions ?? []).toEqual(["https://auth.openai.com/*"]);
+    expect(manifest.host_permissions ?? []).toEqual(["https://auth.openai.com/*", "https://openrouter.ai/*"]);
     expect(manifest.content_scripts ?? []).toEqual([]);
     expect(manifest.background.type).toBe("module");
     expect(manifest.content_security_policy.extension_pages).toBe("script-src 'self'; object-src 'self'");

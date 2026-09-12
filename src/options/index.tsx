@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { WaveformIcon } from "@phosphor-icons/react";
 import { Separator } from "@/components/ui/separator";
 import { AccountSection } from "./account";
+import { EngineSection } from "./engine";
+import { OpenRouterSection } from "./openrouter";
 
 function Options() {
   return (
@@ -14,7 +16,11 @@ function Options() {
       <h1 className="mt-12 text-3xl font-semibold tracking-tight">Settings</h1>
       <p className="mt-3 text-base leading-7 text-muted-foreground">This is the starting point for your extension's preferences.</p>
       <Separator className="my-8" />
+      <EngineSection />
+      <Separator className="my-8" />
       <AccountSection />
+      <Separator className="my-8" />
+      <OpenRouterSection />
       <Separator className="my-8" />
       <section aria-labelledby="voice-title">
         <h2 id="voice-title" className="text-lg font-semibold">Voice configuration</h2>

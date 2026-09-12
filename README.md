@@ -33,9 +33,10 @@ bun run check
 ```text
 src/
   popup/          Popup HTML and React entry point
-  options/        Settings HTML and React entry point, plus the ChatGPT account panel
+  options/        Settings HTML and React entry points, plus the engine and account panels
   background/     MV3 service worker
   live/auth/      ChatGPT sign-in, token storage, and token refresh
+  live/openrouter/ Chained engine: model catalog, chat, speech, transcription, settings
   components/ui/  shadcn/ui button and separator
   lib/            Shared utilities, including the tab-tool message types
   styles/         Tailwind stylesheet and theme tokens
@@ -65,6 +66,16 @@ This uses OpenAI's device authorization flow, which exists for clients that cann
 
 Sign-in and refresh live in `src/live/auth/`. The access token is refreshed shortly before it expires. Because the extension drives Codex's public OAuth client from outside Codex, voice sessions bill to the signed-in account and count against its concurrent-session limit.
 
+## OpenRouter engine
+
+The settings page also offers a second engine that runs on your own OpenRouter key, for accounts that cannot use GPT-Live. The two are different engines, not two routes to one: GPT-Live is a single speech-to-speech session, while this one is a chain this code owns, `speech-to-text -> reasoning -> text-to-speech`. That adds latency and puts voice-activity detection on the extension, but every stage is swappable.
+
+Defaults are `deepseek/deepseek-v4.1-flash` for reasoning, `x-ai/grok-stt-1.0` for listening, and `x-ai/grok-voice-tts-1.0` for speaking. Any model in those three categories can be chosen instead, and voices are listed from the catalog, so switching the speech model selects one of its own voices rather than carrying over an invalid one.
+
+Two details worth knowing before changing this code. The catalog at `/api/v1/models` reports 445 models and no audio models at all; speech and transcription models appear only through `?output_modalities=speech` and `?output_modalities=transcription`, which is why `src/live/openrouter/catalog.ts` always uses the filtered endpoints. And OpenRouter answers a `chrome-extension://` preflight with `access-control-allow-origin: *`, so the extension calls it directly with no proxy.
+
+The key is entered on the settings page and stored in `chrome.storage.local`. It is never written to source, logged, or committed. Rotate any key that has been pasted into a chat or a file. `OPENROUTER_API_KEY=... bun run scripts/openrouter-smoke.ts` walks all three stages against the live API without a microphone.
+
 ## Responsibilities
 
 - **akemmanuel** — Builds the tool that lets the agent run arbitrary sandboxed JavaScript.
@@ -73,15 +84,17 @@ Sign-in and refresh live in `src/live/auth/`. The access token is refreshed shor
 
 ## Scope
 
-The popup exposes tab tools and opens settings. The settings page signs in to ChatGPT and stores the resulting tokens; voice preferences and the voice session itself are not implemented yet. The worker holds the tab tools and is an entry point for future live-session work.
+The popup exposes tab tools and opens settings. The settings page signs in to ChatGPT, stores those tokens, and holds OpenRouter settings; the voice loop itself is not implemented yet, so neither engine can hold a spoken conversation. The worker holds the tab tools and is an entry point for future live-session work.
 
-There is no voice recording or live audio yet, and no content scripts. The extension requests `activeTab` and `scripting` for the popup's tab tools, and `storage` plus host access to `auth.openai.com` for sign-in. Register future worker listeners at module scope; MV3 workers can stop when idle, so globals are not durable storage.
+There is no voice recording or live audio yet, and no content scripts. The extension requests `activeTab` and `scripting` for the popup's tab tools, and `storage` plus host access to `auth.openai.com` and `openrouter.ai` for the two engines. Register future worker listeners at module scope; MV3 workers can stop when idle, so globals are not durable storage.
 
 ## Verification
 
 The initial build loaded in Chromium. Both pages passed axe with zero violations, and the settings API resolved successfully. The popup was visually checked. Settings-page screenshots were blank or timed out, so its visual review remains incomplete. Edge has not been tested.
 
 The device sign-in flow was verified against the live auth server with `bun run scripts/device-flow-smoke.ts`, which completed a real sign-in and read the account id, user id, email, and plan type from the returned id token. The auth endpoints send `access-control-allow-origin: *`, so extension fetch needs no `declarativeNetRequest` rule. The account panel itself has not been exercised in a loaded extension yet, and no voice session has been opened.
+
+The OpenRouter model catalog was checked against the live API: 18 text-to-speech models, 21 speech-to-text models, and the deepseek reasoning default are all present, and the audio endpoints allow a `chrome-extension://` origin. The client is covered by tests against fixtures rather than live calls, so `scripts/openrouter-smoke.ts` still has to be run once with a funded key to confirm the real request shapes.
 
 ## License
 

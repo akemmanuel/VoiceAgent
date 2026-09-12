@@ -76,28 +76,77 @@ disabled for that server or client.
 extension to do the backend work instead of OpenAI running a Responses model. That
 makes the browser-control agent a first-class participant in the voice session.
 
+## Alternative engine: bring-your-own OpenRouter key
+
+GPT-Live needs a paid ChatGPT plan, and the account verified above is on `free`,
+where GPT-Live is not offered. So the extension also supports a second, selectable
+engine built from a user-supplied OpenRouter key. Nothing about the two engines is
+shared except the options page and the agent tools.
+
+They are not the same kind of thing. GPT-Live is one speech-to-speech model over a
+single WebRTC session, with the server doing turn detection. The OpenRouter engine is
+a chain that this code owns:
+
+```text
+microphone -> STT -> LLM (+ agent tools) -> TTS -> speaker
+```
+
+That costs stacked latency and puts voice-activity detection on us, but every stage
+is swappable and the usage bills to the user's own OpenRouter account.
+
+### Verified model availability
+
+Confirmed against the live API, not the docs:
+
+- LLM: `deepseek/deepseek-v4.1-flash`, 1M context, tool calling supported.
+- TTS: 18 models, including `x-ai/grok-voice-tts-1.0`,
+  `google/gemini-3.1-flash-tts-preview`, `qwen/qwen-audio-3.0-tts-flash`, and the
+  free tier `deepgram/flux-tts:free`.
+- STT: 21 models, including `x-ai/grok-stt-1.0`. Grok STT and Grok TTS are both on
+  OpenRouter, so one key covers the whole chain.
+
+Endpoints are OpenAI-compatible: `POST /api/v1/chat/completions`,
+`POST /api/v1/audio/speech`, and `POST /api/v1/audio/transcriptions`.
+
+### Two things the API does that the docs do not say
+
+**The catalog hides audio models.** `GET /api/v1/models` returns 445 models and
+reports no speech or transcription models at all; they appear only when the request
+is filtered with `?output_modalities=speech` or `?output_modalities=transcription`.
+A picker that filters the full list in the client shows an empty TTS menu, so the
+catalog module must use the filtered endpoints and a test must lock that in.
+
+**CORS allows the extension.** `openrouter.ai` answers a `chrome-extension://`
+preflight with `access-control-allow-origin: *` and allows `Authorization`, so the
+extension can call it directly with the user's key. No proxy and no native helper.
+
+### Key handling
+
+The key is entered on the options page and stored in `chrome.storage.local`
+alongside the model choices. It is never written to source, never logged, and never
+committed. A key pasted into a chat, an issue, or a log is compromised and should be
+rotated; the smoke script reads it from the environment for that reason.
+
+The manifest needs host access to `https://openrouter.ai/*` once this engine lands.
+
 ## Structure
 
 ```text
 src/live/
-  auth/provider.ts     AuthProvider interface; the only thing callers import
-  auth/codex-oauth.ts  Token refresh, expiry, JWT claim parsing
-  auth/import.ts       Validate and store an imported ~/.codex/auth.json
-  session/negotiate.ts SDP offer/answer against the ChatGPT backend
-  session/events.ts    oai-events decode into typed events
-  offscreen/audio.ts   RTCPeerConnection, microphone track, playback
-  state.ts             idle -> connecting -> live -> closing state machine
-src/background/live.ts Session lifecycle and message routing
+  auth/         ChatGPT subscription sign-in and token refresh
+  openrouter/   Chained engine: catalog, chat, speech, transcription, settings
+src/options/    Settings page, including which engine is active
 ```
 
-The audio session must run in an offscreen document: MV3 service workers cannot call
-`getUserMedia`, and the session must survive the popup closing. The service worker
-orchestrates; the offscreen document owns media and the peer connection.
+Both engines need microphone capture, so the audio session runs in an offscreen
+document: MV3 service workers cannot call `getUserMedia`, and a session has to
+survive the popup closing. The service worker orchestrates and the offscreen
+document owns media.
 
-Manifest additions: `offscreen`, `storage`, `identity` permissions and host
-permissions for `https://chatgpt.com/*` and `https://auth.openai.com/*`. Host
-permissions are what allow the extension to read the `Location` response header
-cross-origin.
+Manifest host access grows per engine: `auth.openai.com` is already granted,
+GPT-Live adds `chatgpt.com`, and the chained engine adds `openrouter.ai`. Host
+permissions are also what let the extension read the `Location` response header on
+the realtime call and send an `Authorization` header to OpenRouter.
 
 ## Behavior
 
