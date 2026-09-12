@@ -108,18 +108,18 @@ function Popup() {
   }
 
   return (
-    <main className="popup-shell p-4" data-voice-state={voice?.state ?? "idle"}>
-      <header className="app-header flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <span className="brand-mark flex size-9 items-center justify-center rounded-xl text-primary-foreground">
+    <main className="popup-shell" data-voice-state={voice?.state ?? "idle"}>
+      <header className="app-header flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="brand-mark flex size-9 shrink-0 items-center justify-center rounded-xl text-primary-foreground">
             <WaveformIcon size={21} weight="bold" aria-hidden="true" />
           </span>
-          <div>
-            <h1 className="text-base font-semibold tracking-tight">VoiceAgent</h1>
-            <p className="text-xs text-muted-foreground">Your browser, voice controlled</p>
+          <div className="min-w-0">
+            <h1 className="truncate text-base font-semibold tracking-tight">VoiceAgent</h1>
+            <p className="truncate text-xs text-muted-foreground">Your browser, voice controlled</p>
           </div>
         </div>
-        <Button variant="ghost" size="icon" onClick={openSettings} disabled={opening} aria-label="Open settings" title="Open settings">
+        <Button variant="ghost" size="icon" className="shrink-0" onClick={openSettings} disabled={opening} aria-label="Open settings" title="Open settings">
           <GearSixIcon className={opening ? "animate-spin" : ""} aria-hidden="true" />
         </Button>
       </header>
@@ -130,8 +130,8 @@ function Popup() {
         </div>
       )}
 
-      <section aria-labelledby="voice-title" className="voice-card mt-4 rounded-2xl p-5" aria-live="polite">
-        <div className="flex items-center gap-3">
+      <section aria-labelledby="voice-title" className="voice-card mt-4 rounded-2xl" aria-live="polite">
+        <div className="voice-summary grid items-center gap-3">
           <span className={`voice-orb ${voiceActive ? "voice-orb-active" : ""}`} aria-hidden="true">
             <span className="voice-bars"><span /><span /><span /><span /><span /></span>
           </span>
@@ -142,7 +142,7 @@ function Popup() {
             </p>
           </div>
           <span className={`status-chip ${voiceActive ? "status-chip-active" : ""}`}>
-            <span aria-hidden="true" />{voiceActive ? "Live" : "Ready"}
+            <span aria-hidden="true" /><span className="status-text">{voiceActive ? "Live" : "Ready"}</span>
           </span>
         </div>
 
