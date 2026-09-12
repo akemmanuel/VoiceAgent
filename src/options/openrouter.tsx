@@ -169,6 +169,21 @@ export function OpenRouterSection() {
           </div>
         )}
 
+        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-4 focus-within:ring-[3px] focus-within:ring-ring/50">
+          <input
+            type="checkbox"
+            checked={settings.disableReasoning}
+            onChange={event => update({ disableReasoning: event.target.checked })}
+            className="mt-0.5 size-4 accent-primary"
+          />
+          <span>
+            <span className="block text-sm font-medium">Answer immediately</span>
+            <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+              Turns off the model's private reasoning so it starts answering right away. Leave this on for conversation; turn it off when you need the model to think through something harder and can wait.
+            </span>
+          </span>
+        </label>
+
         <div className="flex flex-wrap items-center gap-3">
           <Button onClick={() => void save()}>
             {saved ? <CheckCircleIcon aria-hidden="true" /> : null}

@@ -13,7 +13,7 @@
 import type { ChatMessage } from "@/live/openrouter/client";
 import { createChatCompletion, createSpeech, createTranscription } from "@/live/openrouter/client";
 import { fetchSpeechModels, type CatalogModel } from "@/live/openrouter/catalog";
-import { effectiveVoice, readOpenRouterSettings } from "@/live/openrouter/settings";
+import { effectiveVoice, readOpenRouterSettings, reasoningOption } from "@/live/openrouter/settings";
 import { readEngine, type VoiceEngine } from "@/live/settings";
 import { bytesToBase64 } from "@/live/voice/audio-codec";
 import { reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "@/live/voice/conversation";
@@ -94,7 +94,14 @@ async function runVoiceTurn(userText: string): Promise<void> {
     const result = await runTurn(
       {
         chat: (messages, tools) =>
-          createChatCompletion({ apiKey: settings.apiKey, model: settings.chatModel, messages, tools, signal: controller.signal }),
+          createChatCompletion({
+            apiKey: settings.apiKey,
+            model: settings.chatModel,
+            messages,
+            tools,
+            reasoning: reasoningOption(settings),
+            signal: controller.signal,
+          }),
         executeTool: executeBrowserTool,
       },
       // The system prompt is seeded once and stays at the head of the history.

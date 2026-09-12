@@ -13,6 +13,7 @@
 import { createChatCompletion, createSpeech, createTranscription } from "../src/live/openrouter/client";
 import { fetchSpeechModels, fetchTranscriptionModels, resolveVoice } from "../src/live/openrouter/catalog";
 import { runTurn, systemMessage } from "../src/live/voice/turn";
+import { DEFAULT_OPENROUTER_SETTINGS, reasoningOption } from "../src/live/openrouter/settings";
 import { rmsFromFloat } from "../src/live/voice/audio-codec";
 import { DEFAULT_VAD, VoiceActivityDetector } from "../src/live/voice/vad";
 import { BROWSER_TOOLS } from "../src/background/tab-tools";
@@ -126,7 +127,8 @@ stage = performance.now();
 const toolCalls: { name: string; args: string }[] = [];
 const turn = await runTurn(
   {
-    chat: (messages, tools) => createChatCompletion({ apiKey, model: chatModel, messages, tools }),
+    chat: (messages, tools) =>
+      createChatCompletion({ apiKey, model: chatModel, messages, tools, reasoning: reasoningOption(DEFAULT_OPENROUTER_SETTINGS) }),
     // The browser tools need a tab, so the harness answers for them.
     executeTool: async (name, args) => {
       toolCalls.push({ name, args });

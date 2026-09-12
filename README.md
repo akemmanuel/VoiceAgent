@@ -139,6 +139,21 @@ Two conclusions that change the design. First, the ~5.8s that appears on every a
 
 The remaining problem is not the transport. Of 119 streamed deltas in a bounded reply, **114 were reasoning tokens and 5 were content**. The answer only begins around 4.5s in because the model thinks first. Streaming cannot fix that; the reasoning settings or the model choice have to. PCM is the right format for playback because it can be scheduled without frame alignment, unlike mp3.
 
+### Reasoning off, and why it is the default
+
+Sending `reasoning: { enabled: false }` removes the thinking pause, and the settings page exposes it as **Answer immediately**, on by default. Measured on one warm connection, four consecutive replies:
+
+| | First speakable word | Complete | Reasoning deltas |
+| --- | --- | --- | --- |
+| default | 1.09s | 1.27s | 17 |
+| reasoning off | 0.86s | 1.59s | 0 |
+| default again | **8.22s** | 8.29s | 38 |
+| reasoning off again | **0.77s** | **1.09s** | 0 |
+
+The mean improves, but the variance is the real win. Reasoning decides per turn how long to think, so the same question can answer in 1.3s or hang for 8.3s, and a user hears that as a fault. With it off, every measured turn began speaking inside a second. End to end, an agent turn that calls a tool fell from 5.1s to 3.4s, which is two model round-trips.
+
+The cost is real reasoning quality, so the setting stays available: leave it on for conversation, turn it off when a question deserves thinking time.
+
 Microphone permission, MediaRecorder's real output format, and playback still have never executed outside a test double, because the harness deliberately bypasses them.
 
 ## License

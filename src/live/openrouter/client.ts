@@ -36,6 +36,16 @@ export type ToolDefinition = {
   parameters: Record<string, unknown>;
 };
 
+/**
+ * OpenRouter's reasoning control.
+ *
+ * A voice turn disables reasoning. Measured against the live API, a reasoning model
+ * sometimes answers in 1.3s and sometimes thinks for 8.3s first, and the user hears
+ * that as a hang. Disabling it removes the tail: every measured reply began speaking
+ * inside a second. It is a latency setting, not a quality one, so it is configurable.
+ */
+export type ReasoningOptions = { enabled: boolean };
+
 export type ChatResult = {
   /** Spoken text, which is the assistant message content. */
   content: string;
@@ -73,6 +83,8 @@ export type ChatRequest = {
   model: string;
   messages: ChatMessage[];
   tools?: ToolDefinition[];
+  /** Omitted entirely when unset, so a provider default is left alone. */
+  reasoning?: ReasoningOptions;
   signal?: AbortSignal;
 };
 
@@ -117,6 +129,7 @@ export async function createChatCompletion(request: ChatRequest, fetchImpl: Fetc
     body: JSON.stringify({
       model: request.model,
       messages: request.messages.map(toWireMessage),
+      ...(request.reasoning ? { reasoning: request.reasoning } : {}),
       ...(request.tools?.length
         ? {
             tools: request.tools.map(tool => ({

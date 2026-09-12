@@ -13,6 +13,7 @@ import {
   effectiveVoice,
   isOpenRouterConfigured,
   readOpenRouterSettings,
+  reasoningOption,
   writeOpenRouterSettings,
 } from "./settings";
 
@@ -131,6 +132,23 @@ describe("chat completions", () => {
     expect(sent.messages[1]).toEqual({ role: "tool", content: "page text", tool_call_id: "call_1" });
   });
 
+  test("sends a reasoning control only when one is asked for", async () => {
+    let withReasoning: Record<string, unknown> = {};
+    await createChatCompletion({ apiKey: "key", model: "m", messages: [], reasoning: { enabled: false } }, async (_url, init) => {
+      withReasoning = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonResponse({ choices: [{ message: { content: "ok" } }] });
+    });
+    expect(withReasoning.reasoning).toEqual({ enabled: false });
+
+    // Absent means the provider default is left alone, so the key must not appear at all.
+    let without: Record<string, unknown> = {};
+    await createChatCompletion({ apiKey: "key", model: "m", messages: [] }, async (_url, init) => {
+      without = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonResponse({ choices: [{ message: { content: "ok" } }] });
+    });
+    expect("reasoning" in without).toBe(false);
+  });
+
   test("surfaces the provider's message and status", async () => {
     const attempt = createChatCompletion({ apiKey: "bad", model: "m", messages: [] }, async () =>
       jsonResponse({ error: { message: "Insufficient credits." } }, 402),
@@ -236,6 +254,7 @@ describe("openrouter settings", () => {
       speechModel: "qwen/qwen-audio-3.0-tts-flash",
       transcriptionModel: "openai/gpt-transcribe",
       voice: "loongjohn",
+      disableReasoning: false,
     });
     expect(await readOpenRouterSettings()).toEqual({
       apiKey: "sk-or-v1-secret",
@@ -243,7 +262,15 @@ describe("openrouter settings", () => {
       speechModel: "qwen/qwen-audio-3.0-tts-flash",
       transcriptionModel: "openai/gpt-transcribe",
       voice: "loongjohn",
+      disableReasoning: false,
     });
+  });
+
+  test("enables the immediate-answer default for settings saved before the option existed", async () => {
+    store.set("openrouter-settings", { apiKey: "sk-or-v1-secret", chatModel: "m", speechModel: "s", transcriptionModel: "t", voice: "v" });
+    expect((await readOpenRouterSettings()).disableReasoning).toBe(true);
+    expect(reasoningOption(DEFAULT_OPENROUTER_SETTINGS)).toEqual({ enabled: false });
+    expect(reasoningOption({ ...DEFAULT_OPENROUTER_SETTINGS, disableReasoning: false })).toEqual({ enabled: true });
   });
 
   test("requires a key before the engine counts as configured", async () => {
