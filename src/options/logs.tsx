@@ -49,7 +49,7 @@ export function LogsSection() {
     <section id="logs" aria-labelledby="logs-title" className="scroll-mt-6">
       <h2 id="logs-title" className="text-lg font-semibold">Logs</h2>
       <p className="mt-3 text-sm leading-6 text-muted-foreground">
-        Live diagnostics for voice connections, delegation, model requests and tools. The latest {LOG_LIMIT} entries stay on this device until cleared or replaced by newer logs.
+        Live diagnostics for voice connections, model requests and tools. The latest {LOG_LIMIT} entries stay on this device until cleared or replaced by newer logs.
       </p>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">
         No tokens, audio, transcripts, page content or raw error bodies. Errors show the failing stage, error type and HTTP status when available. Copy logs to share a problem.

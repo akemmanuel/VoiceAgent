@@ -4,6 +4,7 @@ import { WaveformIcon } from "@phosphor-icons/react";
 import { AccountSection } from "./account";
 import { EngineSection } from "./engine";
 import { OpenRouterSection } from "./openrouter";
+import { LogsSection } from "./logs";
 import { ProfileSection } from "./profile";
 import { VoiceConfigurationSection } from "./voice";
 
@@ -33,6 +34,7 @@ function Options() {
           <div className="settings-card"><AccountSection /></div>
           <div className="settings-card"><OpenRouterSection /></div>
           <div className="settings-card"><VoiceConfigurationSection /></div>
+          <div className="settings-card"><LogsSection /></div>
         </div>
 
         <footer className="py-8 text-center text-xs leading-5 text-muted-foreground">Changes are saved in this browser and applied to VoiceAgent.</footer>
