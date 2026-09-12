@@ -231,6 +231,10 @@ async function dispatch(event: VoiceEvent): Promise<void> {
 export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceStatus> {
   switch (request.type) {
     case "voice-status":
+      // Between sessions the panel reports the configured engine, so read the stored
+      // choice rather than leaving the default, or the previous session's engine, on
+      // screen. During a session the running engine is the true answer and is kept.
+      if (!isActive(state)) engine = await readEngine();
       return status();
 
     case "voice-start": {
