@@ -126,6 +126,8 @@ Automatic gain control is deliberately disabled on the microphone, because it am
 
 The agent turn in `src/live/voice/turn.ts` receives a fresh active-tab snapshot before every OpenRouter request, then runs a bounded tool loop over the tools in `src/background/tab-tools.ts`. This means that a request such as “enable this app in the open Nextcloud administration page” starts with the actual page and its controls, rather than relying on the model to choose an initial read operation. Page text is explicitly treated as untrusted data, never as instructions. Repeated user-authorized work, such as updating all visible apps, should use bounded `run-automation`/`for-each` rather than stopping after one routine click. A tool failure is reported back to the model rather than ending the turn. The loop allows 16 model rounds, enough for ordinary multi-page admin work while still preventing an unlimited spend.
 
+The side panel's **Download debug report** button creates a local JSON file only after the user clicks it. It includes the extension version, current state, concise agent activity, the retained agent conversation/tool history, and a fresh DOM snapshot of the active page with its visible controls. It deliberately contains no OpenRouter key or ChatGPT token. The report can contain private page and conversation content, so inspect it before sharing it for troubleshooting.
+
 ## Responsibilities
 
 - **akemmanuel** — Builds the tool that lets the agent run arbitrary sandboxed JavaScript.

@@ -5,7 +5,9 @@
  */
 
 import type { ChatGPTVoice, VoiceEngine } from "@/live/settings";
+import type { ChatMessage } from "@/live/openrouter/client";
 import type { ConversationState } from "@/live/voice/conversation";
+import type { FrameSnapshot, PageSnapshot } from "@/lib/tab-tools";
 
 /** Worker to offscreen document. */
 export type OffscreenCommand =
@@ -43,6 +45,9 @@ export type VoiceSettingsChangedMessage = { type: "voice-settings-changed" };
 
 export type VoiceLevels = { rms: number; floor: number; onsetRms: number };
 
+/** A concise local trace of what the browser agent attempted in its latest turn. */
+export type AgentActivity = { kind: "page-read" | "tool"; tool: string; outcome: string; failed: boolean };
+
 export type VoiceStatus = {
   state: ConversationState;
   /** Which engine the session is running, or would run. */
@@ -54,9 +59,20 @@ export type VoiceStatus = {
   error: string | null;
   /** Live microphone reading, so a muted mic and a noisy room can be told apart. */
   levels: VoiceLevels | null;
+  /** Local diagnostic trace; page contents and prompts are never included here. */
+  activity: AgentActivity[];
 };
 
 export type VoiceStatusMessage = { type: "voice-status-changed"; status: VoiceStatus };
+
+/** Returned only after an explicit click in the extension UI. Contains no credentials. */
+export type VoiceDebugReport = {
+  generatedAt: string;
+  extensionVersion: string;
+  status: VoiceStatus;
+  conversationHistory: ChatMessage[];
+  activePage: { ok: boolean; snapshot?: PageSnapshot; frames?: FrameSnapshot[]; error?: string };
+};
 
 export function isOffscreenCommand(message: unknown): message is OffscreenCommand {
   return typeof message === "object" && message !== null && (message as { target?: unknown }).target === "offscreen";

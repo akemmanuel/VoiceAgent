@@ -394,6 +394,7 @@ describe("agent turn", () => {
     expect(calls).toEqual([{ name: "inspect-active-tab", args: "{}" }]);
     expect(result.reply).toBe("The tab is a settings page.");
     expect(result.toolCallCount).toBe(1);
+    expect(result.activity).toEqual([{ kind: "tool", tool: "inspect-active-tab", outcome: "Read the active page.", failed: false }]);
     // The assistant tool-call turn must sit between the request and the result.
     const toolMessage = result.history.find(message => message.role === "tool");
     expect(toolMessage).toEqual({ role: "tool", content: "Settings — VoiceAgent", toolCallId: "call_1" });

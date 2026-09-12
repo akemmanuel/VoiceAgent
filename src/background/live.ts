@@ -21,9 +21,9 @@ import { readChatGPTVoice, readEngine, type VoiceEngine } from "@/live/settings"
 import { bytesToBase64 } from "@/live/voice/audio-codec";
 import { isActive, reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "@/live/voice/conversation";
 import { readStoredConversation, storeConversation } from "@/live/voice/history";
-import type { OffscreenCommand, OffscreenEvent, VoiceLevels, VoiceRequest, VoiceStatus } from "@/live/voice/protocol";
+import type { AgentActivity, OffscreenCommand, OffscreenEvent, VoiceDebugReport, VoiceLevels, VoiceRequest, VoiceStatus } from "@/live/voice/protocol";
 import { requestWithActivePage, runTurn, systemMessage } from "@/live/voice/turn";
-import { BROWSER_TOOLS, executeBrowserTool } from "./tab-tools";
+import { BROWSER_TOOLS, executeBrowserTool, handleTabToolRequest } from "./tab-tools";
 
 const OFFSCREEN_PATH = "offscreen/index.html";
 const CONVERSATION_STORAGE_KEY = "voiceAgent.conversation.v1";
@@ -34,6 +34,7 @@ let error: string | null = null;
 let transcript = "";
 let reply = "";
 let levels: VoiceLevels | null = null;
+let activity: AgentActivity[] = [];
 let history: ChatMessage[] = [];
 let conversationLoaded = false;
 let turnAbort: AbortController | null = null;
@@ -46,8 +47,14 @@ function messageOf(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
 }
 
+function pageActivityOutcome(snapshot: string): string {
+  if (/^the active page could not be inspected:/i.test(snapshot)) return snapshot.replace(/\s+/g, " ").trim().slice(0, 240);
+  const title = /^Page:\s*(.+)$/m.exec(snapshot)?.[1]?.trim();
+  return title ? `Read ${title}.` : "Read the active page.";
+}
+
 function status(): VoiceStatus {
-  return { state, engine, transcript, reply, error, levels };
+  return { state, engine, transcript, reply, error, levels, activity };
 }
 
 async function loadConversation(): Promise<void> {
@@ -79,6 +86,7 @@ async function resetConversation(): Promise<VoiceStatus> {
   history = [];
   transcript = "";
   reply = "";
+  activity = [];
   error = null;
   state = "idle";
   conversationLoaded = true;
@@ -144,12 +152,19 @@ async function runAgentTurn(userText: string): Promise<string> {
   // Page awareness must not depend on a model voluntarily deciding to call an
   // observation tool. This also lets it act on the open admin page in its first
   // tool round. The snapshot is intentionally not retained as user text.
+  activity = [];
   let pageSnapshot: string;
   try {
     pageSnapshot = await executeBrowserTool("inspect-active-tab", "{}");
   } catch (cause) {
     pageSnapshot = `The active page could not be inspected: ${messageOf(cause, "unknown browser error")}`;
   }
+  activity.push({
+    kind: "page-read",
+    tool: "inspect-active-tab",
+    outcome: pageActivityOutcome(pageSnapshot),
+    failed: /^the active page could not be inspected:/i.test(pageSnapshot),
+  });
   const modelRequest = requestWithActivePage(userText, pageSnapshot);
 
   const controller = new AbortController();
@@ -167,6 +182,7 @@ async function runAgentTurn(userText: string): Promise<string> {
             signal: controller.signal,
           }),
         executeTool: executeBrowserTool,
+        onToolActivity: entry => activity.push(entry),
       },
       // Refresh the system instruction on every turn. This lets a stored
       // conversation safely adopt new browser-agent safeguards after an update.
@@ -314,6 +330,24 @@ export async function handleVoiceSettingsChanged(): Promise<void> {
   await broadcast();
 }
 
+/**
+ * A user-triggered diagnostic bundle. It intentionally contains browser and
+ * conversation content, so it is never collected automatically or sent anywhere.
+ */
+export async function handleVoiceDebugReport(): Promise<VoiceDebugReport> {
+  await loadConversation();
+  const page = await handleTabToolRequest({ type: "inspect-active-tab" });
+  return {
+    generatedAt: new Date().toISOString(),
+    extensionVersion: chrome.runtime.getManifest().version,
+    status: status(),
+    conversationHistory: history,
+    activePage: page.ok
+      ? { ok: true, snapshot: page.snapshot, frames: page.frames }
+      : { ok: false, error: page.error },
+  };
+}
+
 export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceStatus> {
   switch (request.type) {
     case "voice-status":
@@ -332,6 +366,7 @@ export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceSt
       // Telemetry only. The conversation itself is restored above, not reset, so
       // starting a session continues the stored conversation.
       levels = null;
+      activity = [];
       await broadcast();
       try {
         if (engine === "chatgpt") await getAccessToken();

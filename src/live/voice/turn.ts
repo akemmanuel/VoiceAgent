@@ -8,6 +8,7 @@
  */
 
 import type { ChatMessage, ChatResult, ToolDefinition } from "../openrouter/client";
+import type { AgentActivity } from "./protocol";
 
 /**
  * How many model round-trips one user request may cost. This is deliberately
@@ -48,6 +49,8 @@ export type TurnDependencies = {
   chat: (messages: ChatMessage[], tools: ToolDefinition[]) => Promise<ChatResult>;
   /** Runs one browser tool and returns its text result. */
   executeTool: (name: string, args: string) => Promise<string>;
+  /** Receives each result immediately, including results before a later failure. */
+  onToolActivity?: (entry: AgentActivity) => void;
   maxSteps?: number;
 };
 
@@ -55,9 +58,18 @@ export type TurnResult = {
   history: ChatMessage[];
   reply: string;
   toolCallCount: number;
+  activity: AgentActivity[];
   /** True when the model was still asking for tools at the step limit. */
   truncated: boolean;
 };
+
+function activityOutcome(tool: string, content: string): string {
+  if (tool === "inspect-active-tab") {
+    const title = /^Page:\s*(.+)$/m.exec(content)?.[1]?.trim();
+    return title ? `Read ${title}.` : "Read the active page.";
+  }
+  return content.replace(/\s+/g, " ").trim().slice(0, 240);
+}
 
 /**
  * Arguments arrive as a JSON string from the model and are not guaranteed to parse.
@@ -81,13 +93,14 @@ export async function runTurn(
   const { chat, executeTool, maxSteps = DEFAULT_MAX_TOOL_STEPS } = dependencies;
   const messages: ChatMessage[] = [...history, { role: "user", content: transcript }];
   let toolCallCount = 0;
+  const activity: AgentActivity[] = [];
 
   for (let step = 0; step < maxSteps; step += 1) {
     const result = await chat(messages, tools);
 
     if (result.toolCalls.length === 0) {
       messages.push({ role: "assistant", content: result.content });
-      return { history: messages, reply: result.content, toolCallCount, truncated: false };
+      return { history: messages, reply: result.content, toolCallCount, activity, truncated: false };
     }
 
     // The assistant turn that requested the tools must precede their results.
@@ -102,9 +115,17 @@ export async function runTurn(
         // because the model can usually apologise or try something else.
         content = cause instanceof Error ? `The tool failed: ${cause.message}` : "The tool failed.";
       }
+      const entry: AgentActivity = {
+        kind: "tool",
+        tool: call.name,
+        outcome: activityOutcome(call.name, content),
+        failed: /^the tool failed:|^(no active|no element|the page returned no|timed out|could not|the browser denied|cannot access)/i.test(content),
+      };
+      activity.push(entry);
+      dependencies.onToolActivity?.(entry);
       messages.push({ role: "tool", content, toolCallId: call.id });
     }
   }
 
-  return { history: messages, reply: "", toolCallCount, truncated: true };
+  return { history: messages, reply: "", toolCallCount, activity, truncated: true };
 }

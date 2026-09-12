@@ -1,11 +1,11 @@
 import { StrictMode, useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowCounterClockwiseIcon, CaretDownIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, PaperPlaneTiltIcon, WaveformIcon } from "@phosphor-icons/react";
+import { ArrowCounterClockwiseIcon, CaretDownIcon, DownloadSimpleIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, PaperPlaneTiltIcon, WaveformIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { PageSnapshot, TabAction, TabToolRequest, TabToolResponse } from "@/lib/tab-tools";
 import { isActive, type ConversationState } from "@/live/voice/conversation";
-import type { VoiceRequest, VoiceStatus, VoiceStatusMessage } from "@/live/voice/protocol";
+import type { VoiceDebugReport, VoiceRequest, VoiceStatus, VoiceStatusMessage } from "@/live/voice/protocol";
 
 const VOICE_LABELS: Record<ConversationState, string> = {
   idle: "Not listening",
@@ -50,6 +50,7 @@ function Popup() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [resettingConversation, setResettingConversation] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [exportingDebug, setExportingDebug] = useState(false);
 
   useEffect(() => {
     void sendVoice({ type: "voice-status" }).then(setVoice);
@@ -120,6 +121,28 @@ function Popup() {
       else setError("The conversation could not be reset. Try reopening the side panel.");
     } finally {
       setResettingConversation(false);
+    }
+  }
+
+  async function downloadDebugReport() {
+    setExportingDebug(true);
+    setError(null);
+    try {
+      const report = await chrome.runtime.sendMessage({ type: "voice-debug-report" }) as VoiceDebugReport | { error?: string };
+      if ("error" in report) throw new Error(report.error || "Debug report could not be created.");
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `voiceagent-debug-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Debug report could not be downloaded.");
+    } finally {
+      setExportingDebug(false);
     }
   }
 
@@ -237,6 +260,24 @@ function Popup() {
             mic {voice.levels.rms.toFixed(4)} · room {voice.levels.floor.toFixed(4)} · needs {voice.levels.onsetRms.toFixed(4)}
           </p>
         )}
+        {voice?.activity.length ? (
+          <details className="mt-3 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-xs" open={voice.activity.some(entry => entry.failed)}>
+            <summary className="cursor-pointer font-medium">Agent activity ({voice.activity.length})</summary>
+            <ol className="mt-2 space-y-2 border-t border-border pt-2 text-muted-foreground">
+              {voice.activity.map((entry, index) => (
+                <li key={`${entry.tool}-${index}`}>
+                  <span className={entry.failed ? "font-medium text-destructive" : "font-medium text-foreground"}>{entry.tool}</span>
+                  <span>: {entry.outcome}</span>
+                </li>
+              ))}
+            </ol>
+          </details>
+        ) : null}
+        <Button variant="secondary" size="sm" className="mt-3 w-full" onClick={downloadDebugReport} disabled={exportingDebug}>
+          <DownloadSimpleIcon aria-hidden="true" />
+          {exportingDebug ? "Preparing debug report…" : "Download debug report"}
+        </Button>
+        <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground">Includes local page and conversation data; review it before sharing.</p>
         {voice?.error && <p role="alert" className="mt-3 text-sm leading-5 text-destructive">{voice.error}</p>}
         {error && <p role="alert" className="mt-3 text-sm leading-5 text-destructive">{error}</p>}
       </section>
