@@ -110,7 +110,13 @@ The device sign-in flow was verified against the live auth server with `bun run 
 
 The OpenRouter model catalog was checked against the live API: 18 text-to-speech models, 21 speech-to-text models, and the deepseek reasoning default are all present, and the audio endpoints allow a `chrome-extension://` origin. The client is covered by tests against fixtures rather than live calls, so `scripts/openrouter-smoke.ts` still has to be run once with a funded key to confirm the real request shapes.
 
-The voice loop's logic is covered by 25 unit tests: detector thresholds and hysteresis, every state transition including barge-in and late replies, the tool loop and its step limit, and the audio helpers. **The loop has not been run with a real microphone in a loaded browser.** Microphone permission, recorder output format, and playback have never executed outside a test double, so treat the first live session as the real test of the audio layer.
+The voice loop's logic is covered by 25 unit tests: detector thresholds and hysteresis, every state transition including barge-in and late replies, the tool loop and its step limit, and the audio helpers.
+
+The whole loop was then run end to end without a microphone, using `OPENROUTER_API_KEY=... bun run scripts/voice-loop-smoke.ts`. That harness replaces the microphone with a TTS to STT round trip and stubs only the browser tools, so the catalog, both audio endpoints, and the real agent loop all execute. On this machine: the detector followed a synthetic envelope exactly (`speech-end@1200ms` for a 1.2s tone), the transcribed question came back with 6 of 6 key words, the model called `inspect-active-tab` and summarised the fixture correctly, and `ffprobe` confirmed both synthesized files are valid mp3.
+
+The same run exposed the open problem. Per-turn latency was 0.7s to transcribe, 5.1s to answer, and 2.6s to synthesize, and the spoken reply ran **15.4 seconds**. A voice assistant needs to start speaking within about a second and finish quickly, so the reply length and the reasoning model choice both need work before this feels conversational. Speech recognition, synthesis and tool calling are all confirmed working; the pacing is not.
+
+Microphone permission, MediaRecorder's real output format, and playback still have never executed outside a test double, because the harness deliberately bypasses them.
 
 ## License
 
