@@ -122,7 +122,22 @@ The voice loop's logic is covered by 25 unit tests: detector thresholds and hyst
 
 The whole loop was then run end to end without a microphone, using `OPENROUTER_API_KEY=... bun run scripts/voice-loop-smoke.ts`. That harness replaces the microphone with a TTS to STT round trip and stubs only the browser tools, so the catalog, both audio endpoints, and the real agent loop all execute. On this machine: the detector followed a synthetic envelope exactly (`speech-end@1200ms` for a 1.2s tone), the transcribed question came back with 6 of 6 key words, the model called `inspect-active-tab` and summarised the fixture correctly, and `ffprobe` confirmed both synthesized files are valid mp3.
 
-The same run exposed the open problem. Per-turn latency was 0.7s to transcribe, 5.1s to answer, and 2.6s to synthesize, and the spoken reply ran **15.4 seconds**. A voice assistant needs to start speaking within about a second and finish quickly, so the reply length and the reasoning model choice both need work before this feels conversational. Speech recognition, synthesis and tool calling are all confirmed working; the pacing is not.
+The same run exposed the open problem. Per-turn latency was 0.7s to transcribe, 5.1s to answer, and 2.6s to synthesize, and the spoken reply ran **15.4 seconds**. A voice assistant needs to start speaking within about a second, so the reply length and the model choice still need work before this feels conversational. Speech recognition, synthesis and tool calling are all confirmed working; the pacing is not.
+
+### Where the latency actually is
+
+Measured separately against the live API, because the first reading blamed the wrong stage:
+
+| Measurement | Cold connection | Warm connection |
+| --- | --- | --- |
+| TTS, first byte | 5.8s | **0.65s** |
+| TTS, long text (608 chars) | — | 0.65s first byte, 5.3s complete |
+| Chat, first token with `stream: true` | 26.8s | **0.72s** |
+| Chat, complete bounded reply | — | 5.3s |
+
+Two conclusions that change the design. First, the ~5.8s that appears on every audio request is a **one-time cold-connection cost**, not synthesis: a second request on the same connection takes 0.65s. It is already paid by the catalog fetch at session start, and a warm-up request would guarantee it. Second, the audio body arrives progressively — first byte at 0.65s against a 5.3s total — so TTS is streamable, and `stream: true` is accepted on the speech endpoint too.
+
+The remaining problem is not the transport. Of 119 streamed deltas in a bounded reply, **114 were reasoning tokens and 5 were content**. The answer only begins around 4.5s in because the model thinks first. Streaming cannot fix that; the reasoning settings or the model choice have to. PCM is the right format for playback because it can be scheduled without frame alignment, unlike mp3.
 
 Microphone permission, MediaRecorder's real output format, and playback still have never executed outside a test double, because the harness deliberately bypasses them.
 
