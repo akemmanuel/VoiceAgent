@@ -68,6 +68,8 @@ For repetitive work, `run-automation` accepts a small declarative program with `
 
 Tab inspection traverses open Shadow DOM trees and emits selectors using `>>>` for shadow boundaries. It also inspects scriptable iframes and returns their `frameId`; pass that frame ID to tab actions, waiting, or automation when a control belongs to an iframe. Closed Shadow DOMs and frames that Chrome does not permit the extension to script remain unavailable.
 
+For general research, `search-web` opens a normal Google results tab instead of calling a hidden search service. The agent can inspect those results, use `list-tabs` to retain the user's original context, and `activate-tab` to return to it after research.
+
 ### Browser-agent roadmap
 
 Implemented model tools are: inspection, visible-tab capture, dynamic waiting, bounded repetitive automation, and direct tab actions. The remaining capabilities are document download/parse/upload, full-page capture, open Shadow DOM and same-origin iframe traversal, cookie-banner guidance, structured extraction, and cross-tab workflows. Full Chrome Debugger accessibility/network inspection is intentionally deferred because it carries substantially broader page-debugging access than the current tools.

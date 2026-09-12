@@ -14,6 +14,21 @@ import { formatParsedPdf, readPdfFromUrl } from "./pdf-tools";
 
 export const BROWSER_TOOLS: ToolDefinition[] = [
   {
+    name: "search-web",
+    description: "Open a normal Google search tab for a query. Use this when information is missing from the current page and research is needed; then inspect the active search tab and its sources.",
+    parameters: { type: "object", properties: { query: { type: "string", description: "The web search query." } }, required: ["query"], additionalProperties: false },
+  },
+  {
+    name: "list-tabs",
+    description: "List the current browser tabs with IDs, titles, URLs, and active state. Use it to return to the user's original task after research.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "activate-tab",
+    description: "Make an existing browser tab active by its ID, for example to return from research to the user's original tab.",
+    parameters: { type: "object", properties: { tabId: { type: "number", description: "Tab ID returned by list-tabs." } }, required: ["tabId"], additionalProperties: false },
+  },
+  {
     name: "read-pdf",
     description: "Fetch a PDF from an http(s) URL and extract its text locally. Reads at most 20 MB, 40 pages, and 100000 characters. Use this to understand documents before answering or sorting them.",
     parameters: { type: "object", properties: { url: { type: "string", description: "The PDF URL." } }, required: ["url"], additionalProperties: false },
@@ -182,6 +197,23 @@ export async function executeBrowserTool(name: string, args: string): Promise<st
     if (value !== null && typeof value === "object" && !Array.isArray(value)) parsed = value as Record<string, unknown>;
   } catch {
     return "The arguments were not valid JSON. Call the tool again with valid arguments.";
+  }
+
+  if (name === "search-web") {
+    if (typeof parsed.query !== "string" || !parsed.query.trim()) return "search-web needs a non-empty query.";
+    const tab = await chrome.tabs.create({ url: `https://www.google.com/search?q=${encodeURIComponent(parsed.query)}`, active: true });
+    return `Opened a search tab${tab.id ? ` (${tab.id})` : ""} for: ${parsed.query}.`;
+  }
+
+  if (name === "list-tabs") {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    return tabs.map(tab => `${tab.id ?? "?"}${tab.active ? " [active]" : ""} — ${tab.title ?? "Untitled"} — ${tab.url ?? ""}`).join("\n") || "No browser tabs were found.";
+  }
+
+  if (name === "activate-tab") {
+    if (!Number.isInteger(parsed.tabId)) return "activate-tab needs a numeric tabId.";
+    const tab = await chrome.tabs.update(parsed.tabId as number, { active: true });
+    return `Activated tab ${tab?.id ?? parsed.tabId}.`;
   }
 
   if (name === "read-pdf") {
