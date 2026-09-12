@@ -177,13 +177,20 @@ function Popup() {
             )}
           </div>
         )}
-        {voice && <>
-          <p className="mt-2 text-xs text-muted-foreground">Agent activity: {voice.activity.length} tool call{voice.activity.length === 1 ? "" : "s"}</p>
-          <Button variant="secondary" className="mt-2 w-full" onClick={copyDebugReport}>
-            <CopyIcon aria-hidden="true" />
-            {debugCopied ? "Debug report copied" : "Copy debug report"}
-          </Button>
-        </>}
+        {voice && (
+          <details className="diagnostics-panel mt-3 rounded-lg border border-border/80 text-xs">
+            <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 font-medium">
+              <span>Session diagnostics</span>
+              <span className="text-[10px] font-normal text-muted-foreground">{voice.activity.length} tool call{voice.activity.length === 1 ? "" : "s"}</span>
+            </summary>
+            <div className="border-t border-border px-3 pb-3">
+              <Button variant="secondary" size="sm" className="mt-3 w-full" onClick={copyDebugReport}>
+                <CopyIcon aria-hidden="true" />
+                {debugCopied ? "Debug report copied" : "Copy debug report"}
+              </Button>
+            </div>
+          </details>
+        )}
         {voice?.error && <p role="alert" className="notice-enter mt-3 text-sm leading-5 text-destructive">{voice.error}</p>}
         {error && <p role="alert" className="notice-enter mt-3 text-sm leading-5 text-destructive">{error}</p>}
       </section>
