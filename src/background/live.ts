@@ -89,9 +89,10 @@ async function loadSpeechModels(): Promise<CatalogModel[]> {
  * Speech to text, then the agent turn, then text to speech. Each stage reports its
  * own failure so the user hears which part broke rather than a generic error.
  */
-async function runVoiceTurn(userText: string): Promise<void> {
+/** Run the browser-agent loop used by both typed turns and OpenRouter voice turns. */
+async function runAgentTurn(userText: string): Promise<string> {
   const settings = await readOpenRouterSettings();
-  if (!settings.apiKey) throw new Error("Add an OpenRouter key in settings before starting a voice session.");
+  if (!settings.apiKey) throw new Error("Add an OpenRouter key in settings before using the browser agent.");
 
   const controller = new AbortController();
   turnAbort = controller;
@@ -115,13 +116,47 @@ async function runVoiceTurn(userText: string): Promise<void> {
       BROWSER_TOOLS,
     );
     history = result.history;
-    await dispatch({
-      type: "turn-complete",
-      reply: result.reply || (result.truncated ? "I could not finish that in a reasonable number of steps." : ""),
-    });
+    return result.reply || (result.truncated ? "I could not finish that in a reasonable number of steps." : "");
   } finally {
     turnAbort = null;
   }
+}
+
+async function runVoiceTurn(userText: string): Promise<void> {
+  await dispatch({ type: "turn-complete", reply: await runAgentTurn(userText) });
+}
+
+/**
+ * A typed message is an agent turn, not a synthetic voice turn: it never starts
+ * text-to-speech, but it deliberately retains the same message history.
+ */
+async function runTextTurn(text: string): Promise<VoiceStatus> {
+  const userText = text.trim();
+  if (!userText) return status();
+
+  // A microphone session and a text turn must not race for the same state
+  // machine. Stopping audio keeps `history`, so the next modality continues the
+  // same conversation.
+  if (isActive(state)) await dispatch({ type: "stop" });
+
+  engine = await readEngine();
+  transcript = userText;
+  reply = "";
+  error = null;
+  state = "thinking";
+  await broadcast();
+  try {
+    if (engine !== "openrouter") {
+      throw new Error("Written browser-agent chat uses OpenRouter. Select OpenRouter and add its API key in settings.");
+    }
+    reply = (await runAgentTurn(userText)).trim();
+    state = "idle";
+  } catch (cause) {
+    state = "failed";
+    error = messageOf(cause, "That message could not be processed.");
+  }
+  await broadcast();
+  return status();
 }
 
 async function speak(text: string): Promise<void> {
@@ -250,6 +285,9 @@ export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceSt
     case "voice-stop":
       await dispatch({ type: "stop" });
       return status();
+
+    case "text-send":
+      return runTextTurn(request.text);
   }
 }
 

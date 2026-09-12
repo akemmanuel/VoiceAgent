@@ -100,7 +100,9 @@ The key is entered on the settings page and stored in `chrome.storage.local`. It
 
 ## Voice sessions
 
-**Start voice session** in the popup opens the microphone and runs the loop: detect speech, transcribe it, let the model decide whether to use a browser tool, then speak the reply. **Stop voice session** closes the microphone. The popup shows the live state, the last thing it heard, and the last reply.
+**Start voice session** in the popup opens the microphone and runs the loop: detect speech, transcribe it, let the model decide whether to use a browser tool, then speak the reply. **Stop voice session** closes the microphone. The popup also has a written-message field beside the larger microphone control. With the OpenRouter engine, speech and writing use the same browser-agent loop and one retained conversation history; changing input method never starts a new conversation. Sending a written message while the microphone is active stops audio capture first, while retaining that history. Typed replies stay written and are not played aloud.
+
+Written browser-agent chat currently requires the OpenRouter engine and its API key. The separate ChatGPT engine is a realtime speech session and does not expose the tool-capable chat API used by the extension, so the popup explains how to switch rather than silently creating a different conversation.
 
 Microphone capture and playback live in an offscreen document, because an MV3 service worker cannot call `getUserMedia`. That document stays mechanical: it reports speech boundaries and plays audio, and owns no conversation logic. The worker decides what any of it means.
 

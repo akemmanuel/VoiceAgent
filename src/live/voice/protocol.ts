@@ -28,7 +28,12 @@ export type OffscreenEvent =
   | { source: "offscreen"; type: "playback-end" }
   | { source: "offscreen"; type: "failed"; message: string };
 
-export type VoiceRequest = { type: "voice-start" } | { type: "voice-stop" } | { type: "voice-status" };
+export type VoiceRequest =
+  | { type: "voice-start" }
+  | { type: "voice-stop" }
+  | { type: "voice-status" }
+  /** A written turn uses the same browser-agent history as OpenRouter voice turns. */
+  | { type: "text-send"; text: string };
 
 export type VoiceSettingsChangedMessage = { type: "voice-settings-changed" };
 
@@ -54,6 +59,8 @@ export function isOffscreenEvent(message: unknown): message is OffscreenEvent {
 }
 
 export function isVoiceRequest(message: unknown): message is VoiceRequest {
-  const type = (message as { type?: unknown } | null)?.type;
-  return type === "voice-start" || type === "voice-stop" || type === "voice-status";
+  const candidate = message as { type?: unknown; text?: unknown } | null;
+  const type = candidate?.type;
+  if (type === "text-send") return typeof candidate?.text === "string";
+  return type === "voice-start" || type === "voice-stop" || type === "voice-status" || type === "text-send";
 }

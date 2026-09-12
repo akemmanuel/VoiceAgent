@@ -4,6 +4,7 @@ import { bytesToBase64, rmsFromByteTimeDomain, rmsFromFloat } from "./audio-code
 import { DEFAULT_VAD, VoiceActivityDetector, type VadEvent } from "./vad";
 import { reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "./conversation";
 import { parseToolArguments, runTurn, systemMessage } from "./turn";
+import { isVoiceRequest } from "./protocol";
 import type { ChatMessage, ChatResult, ToolDefinition } from "../openrouter/client";
 
 const LOUD = 0.05;
@@ -17,6 +18,13 @@ const SILENT = 0;
 function detectorFor(overrides: Partial<typeof DEFAULT_VAD> = {}): VoiceActivityDetector {
   return new VoiceActivityDetector({ ...DEFAULT_VAD, calibrationMs: 0, ...overrides });
 }
+
+describe("voice request protocol", () => {
+  test("accepts a written turn only when it contains text", () => {
+    expect(isVoiceRequest({ type: "text-send", text: "Summarize this page" })).toBe(true);
+    expect(isVoiceRequest({ type: "text-send" })).toBe(false);
+  });
+});
 
 /** Pushes frames until an event appears, so tests do not hardcode frame counts. */
 function pushUntilEvent(detector: VoiceActivityDetector, level: number, limit = 60): { event: VadEvent | null; frames: number } {

@@ -1,6 +1,6 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUpRightIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, WaveformIcon } from "@phosphor-icons/react";
+import { ArrowUpRightIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, PaperPlaneTiltIcon, WaveformIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { PageSnapshot, TabAction, TabToolRequest, TabToolResponse } from "@/lib/tab-tools";
@@ -18,7 +18,7 @@ const VOICE_LABELS: Record<ConversationState, string> = {
   failed: "Stopped",
 };
 
-async function sendVoice(message: { type: "voice-start" | "voice-stop" | "voice-status" }): Promise<VoiceStatus | null> {
+async function sendVoice(message: { type: "voice-start" | "voice-stop" | "voice-status" } | { type: "text-send"; text: string }): Promise<VoiceStatus | null> {
   try {
     return (await chrome.runtime.sendMessage(message)) as VoiceStatus;
   } catch {
@@ -46,6 +46,8 @@ function Popup() {
   const [highlightSeconds, setHighlightSeconds] = useState(8);
   const [voice, setVoice] = useState<VoiceStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [writtenMessage, setWrittenMessage] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
 
   useEffect(() => {
     void sendVoice({ type: "voice-status" }).then(setVoice);
@@ -84,6 +86,26 @@ function Popup() {
         : cause instanceof Error ? cause.message : "The voice session could not start.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function sendWrittenMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const message = writtenMessage.trim();
+    if (!message) return;
+
+    setSendingMessage(true);
+    setError(null);
+    try {
+      const next = await sendVoice({ type: "text-send", text: message });
+      if (next) {
+        setVoice(next);
+        setWrittenMessage("");
+      } else {
+        setError("The agent could not be reached. Try reopening the popup.");
+      }
+    } finally {
+      setSendingMessage(false);
     }
   }
 
@@ -161,10 +183,26 @@ function Popup() {
             <Button variant="secondary" onClick={() => act({ kind: "scroll", deltaY: 600 })}>Scroll</Button>
           </div>
         </div>
-        <Button className="mt-6 w-full" onClick={toggleVoice} disabled={busy}>
-          {voice && isActive(voice.state) ? <MicrophoneSlashIcon aria-hidden="true" /> : <MicrophoneIcon aria-hidden="true" />}
-          {busy ? "Working…" : voice && isActive(voice.state) ? "Stop voice session" : "Start voice session"}
-        </Button>
+        <div className="mt-6 flex items-stretch gap-2">
+          <Button className="h-14 min-w-0 flex-1" onClick={toggleVoice} disabled={busy || sendingMessage}>
+            {voice && isActive(voice.state) ? <MicrophoneSlashIcon size={22} aria-hidden="true" /> : <MicrophoneIcon size={22} aria-hidden="true" />}
+            <span className="sr-only">{busy ? "Working" : voice && isActive(voice.state) ? "Stop voice session" : "Start voice session"}</span>
+          </Button>
+          <form className="flex min-w-0 flex-[2] gap-2" onSubmit={sendWrittenMessage}>
+            <input
+              className="min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
+              value={writtenMessage}
+              onChange={event => setWrittenMessage(event.target.value)}
+              placeholder="Write to the agent"
+              aria-label="Write to the agent"
+              disabled={busy || sendingMessage}
+            />
+            <Button type="submit" size="icon" aria-label="Send message" disabled={!writtenMessage.trim() || busy || sendingMessage}>
+              <PaperPlaneTiltIcon aria-hidden="true" />
+            </Button>
+          </form>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">Speak or write — both continue the same browser-agent conversation.</p>
         {voice && (
           <p role="status" className="mt-2 text-xs text-muted-foreground">
             {VOICE_LABELS[voice.state]} · {voice.engine === "openrouter" ? "OpenRouter" : "ChatGPT"} engine
