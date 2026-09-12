@@ -21,6 +21,12 @@ To load it manually, run `bun run build`, then:
 
 After editing, run `bun run build`, reload the extension on the Extensions page, and reopen the popup or refresh settings. There is no development server or hot reload.
 
+### Reloading properly
+
+**Restarting the browser is not enough.** Chromium keeps the extension's service worker script in the profile, and a browser restart reuses it. Ordinary pages such as the popup, the side panel, and the offscreen document are re-read from disk, so they pick up changes while the worker keeps running old code. The result is an extension that is half updated: the UI behaves one way and the worker another, which looks like a bug in whichever half you are looking at.
+
+Reload the extension itself after every build, using **Reload** on `chrome://extensions`, and reopen the side panel. If a change to background code still seems absent, the service worker cache is the reason and reloading until the behaviour changes is the fix.
+
 ## Checks
 
 ```bash
