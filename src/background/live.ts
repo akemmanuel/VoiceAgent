@@ -180,7 +180,9 @@ async function runAgentTurn(userText: string): Promise<string> {
     history = latestUser
       ? result.history.map((message, index) => index === latestUser.index ? { role: "user" as const, content: userText } : message)
       : result.history;
-    return result.reply || (result.truncated ? "I could not finish that in a reasonable number of steps." : "");
+    return result.reply || (result.truncated
+      ? `I reached the browser action limit after ${result.toolCallCount} tool calls before completing this task. Ask me to continue and I will resume from the current page.`
+      : "");
   } finally {
     turnAbort = null;
   }

@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { bytesToBase64, rmsFromByteTimeDomain, rmsFromFloat } from "./audio-codec";
 import { DEFAULT_VAD, VoiceActivityDetector, type VadEvent } from "./vad";
 import { reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "./conversation";
-import { parseToolArguments, requestWithActivePage, runTurn, systemMessage } from "./turn";
+import { DEFAULT_MAX_TOOL_STEPS, parseToolArguments, requestWithActivePage, runTurn, systemMessage } from "./turn";
 import { isVoiceRequest } from "./protocol";
 import type { ChatMessage, ChatResult, ToolDefinition } from "../openrouter/client";
 
@@ -446,6 +446,10 @@ describe("agent turn", () => {
     expect(result.toolCallCount).toBe(3);
   });
 
+  test("has enough room for a normal multi-step admin workflow", () => {
+    expect(DEFAULT_MAX_TOOL_STEPS).toBe(16);
+  });
+
   test("parses tool arguments defensively", () => {
     expect(parseToolArguments('{"selector":"#go"}')).toEqual({ selector: "#go" });
     expect(parseToolArguments("not json")).toEqual({});
@@ -457,6 +461,7 @@ describe("agent turn", () => {
     expect(systemMessage([]).content).toContain("cannot act on the browser");
     expect(systemMessage(tools).content).toContain("inspect-active-tab");
     expect(systemMessage(tools).content).toContain("For downloads, decide from the request");
+    expect(systemMessage(tools).content).toContain("run-automation with for-each");
     expect(systemMessage(tools).content).toContain("untrusted data");
   });
 
