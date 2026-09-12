@@ -22,7 +22,7 @@ import { bytesToBase64 } from "@/live/voice/audio-codec";
 import { isActive, reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "@/live/voice/conversation";
 import { readStoredConversation, storeConversation } from "@/live/voice/history";
 import type { OffscreenCommand, OffscreenEvent, VoiceLevels, VoiceRequest, VoiceStatus } from "@/live/voice/protocol";
-import { runTurn, systemMessage } from "@/live/voice/turn";
+import { requestWithActivePage, runTurn, systemMessage } from "@/live/voice/turn";
 import { BROWSER_TOOLS, executeBrowserTool } from "./tab-tools";
 
 const OFFSCREEN_PATH = "offscreen/index.html";
@@ -141,6 +141,17 @@ async function runAgentTurn(userText: string): Promise<string> {
   const settings = await readOpenRouterSettings();
   if (!settings.apiKey) throw new Error("Add an OpenRouter key in settings before using the browser agent.");
 
+  // Page awareness must not depend on a model voluntarily deciding to call an
+  // observation tool. This also lets it act on the open admin page in its first
+  // tool round. The snapshot is intentionally not retained as user text.
+  let pageSnapshot: string;
+  try {
+    pageSnapshot = await executeBrowserTool("inspect-active-tab", "{}");
+  } catch (cause) {
+    pageSnapshot = `The active page could not be inspected: ${messageOf(cause, "unknown browser error")}`;
+  }
+  const modelRequest = requestWithActivePage(userText, pageSnapshot);
+
   const controller = new AbortController();
   turnAbort = controller;
   try {
@@ -157,13 +168,18 @@ async function runAgentTurn(userText: string): Promise<string> {
           }),
         executeTool: executeBrowserTool,
       },
-      // The system prompt is seeded once and stays at the head of the history.
-      // Old or manually repaired storage without it is still safe to resume.
-      history.some(message => message.role === "system") ? history : [systemMessage(BROWSER_TOOLS), ...history],
-      userText,
+      // Refresh the system instruction on every turn. This lets a stored
+      // conversation safely adopt new browser-agent safeguards after an update.
+      [systemMessage(BROWSER_TOOLS), ...history.filter(message => message.role !== "system")],
+      modelRequest,
       BROWSER_TOOLS,
     );
-    history = result.history;
+    // Do not store a stale page snapshot as if the user had written it. The next
+    // turn obtains a new one after navigation or reload.
+    const latestUser = result.history.map((message, index) => ({ message, index })).reverse().find(({ message }) => message.role === "user" && message.content === modelRequest);
+    history = latestUser
+      ? result.history.map((message, index) => index === latestUser.index ? { role: "user" as const, content: userText } : message)
+      : result.history;
     return result.reply || (result.truncated ? "I could not finish that in a reasonable number of steps." : "");
   } finally {
     turnAbort = null;

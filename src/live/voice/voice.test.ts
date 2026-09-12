@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { bytesToBase64, rmsFromByteTimeDomain, rmsFromFloat } from "./audio-codec";
 import { DEFAULT_VAD, VoiceActivityDetector, type VadEvent } from "./vad";
 import { reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "./conversation";
-import { parseToolArguments, runTurn, systemMessage } from "./turn";
+import { parseToolArguments, requestWithActivePage, runTurn, systemMessage } from "./turn";
 import { isVoiceRequest } from "./protocol";
 import type { ChatMessage, ChatResult, ToolDefinition } from "../openrouter/client";
 
@@ -457,6 +457,14 @@ describe("agent turn", () => {
     expect(systemMessage([]).content).toContain("cannot act on the browser");
     expect(systemMessage(tools).content).toContain("inspect-active-tab");
     expect(systemMessage(tools).content).toContain("For downloads, decide from the request");
+    expect(systemMessage(tools).content).toContain("untrusted data");
+  });
+
+  test("supplies the active page to a turn without confusing it for user instructions", () => {
+    const request = requestWithActivePage("Enable ONLYOFFICE", "Page: Nextcloud\nControls: Apps");
+    expect(request).toContain("User request:\nEnable ONLYOFFICE");
+    expect(request).toContain("untrusted webpage data");
+    expect(request).toContain("<active-page>");
   });
 });
 

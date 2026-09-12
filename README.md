@@ -118,7 +118,7 @@ Two more details matter for correctness rather than tuning. Levels are measured 
 
 Automatic gain control is deliberately disabled on the microphone, because it amplifies exactly the quiet conditions where the floor should read as silence.
 
-The agent turn in `src/live/voice/turn.ts` runs a bounded tool loop over the tools in `src/background/tab-tools.ts`. A tool failure is reported back to the model rather than ending the turn, and the loop stops after `DEFAULT_MAX_TOOL_STEPS` rounds so a model that keeps calling tools cannot spend the user's balance indefinitely.
+The agent turn in `src/live/voice/turn.ts` receives a fresh active-tab snapshot before every OpenRouter request, then runs a bounded tool loop over the tools in `src/background/tab-tools.ts`. This means that a request such as “enable this app in the open Nextcloud administration page” starts with the actual page and its controls, rather than relying on the model to choose an initial read operation. Page text is explicitly treated as untrusted data, never as instructions. A tool failure is reported back to the model rather than ending the turn, and the loop stops after `DEFAULT_MAX_TOOL_STEPS` rounds so a model that keeps calling tools cannot spend the user's balance indefinitely.
 
 ## Responsibilities
 
