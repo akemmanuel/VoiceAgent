@@ -40,11 +40,60 @@
 @layer base {
   * { @apply border-border; }
   body { @apply m-0 bg-background font-sans text-foreground antialiased; }
-  body.popup { width: 360px; }
+  body.popup {
+    width: 380px;
+    max-height: 600px;
+    overflow-y: auto;
+    background: #f4f7f6;
+  }
   button:not(:disabled) { cursor: pointer; }
   ::selection { background: var(--primary); color: var(--primary-foreground); }
   html { scrollbar-color: var(--muted-foreground) var(--background); }
   :focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+}
+
+.popup-shell {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 85% 0%, rgb(34 100 86 / 10%), transparent 36%),
+    linear-gradient(180deg, #f8faf9 0%, #f2f6f4 100%);
+}
+
+.voice-card {
+  backdrop-filter: blur(10px);
+}
+
+.voice-indicator {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--secondary);
+}
+
+.voice-indicator span {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 9999px;
+  background: var(--muted-foreground);
+}
+
+.voice-indicator-active {
+  border-color: rgb(34 100 86 / 35%);
+  background: rgb(34 100 86 / 12%);
+  animation: voice-pulse 2s ease-in-out infinite;
+}
+
+.voice-indicator-active span {
+  background: var(--primary);
+}
+
+@keyframes voice-pulse {
+  50% { box-shadow: 0 0 0 7px rgb(34 100 86 / 8%); }
 }
 
 @media (prefers-reduced-motion: reduce) {

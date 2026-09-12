@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowCounterClockwiseIcon, ArrowUpRightIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, PaperPlaneTiltIcon, WaveformIcon } from "@phosphor-icons/react";
+import { ArrowCounterClockwiseIcon, CaretDownIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, PaperPlaneTiltIcon, WaveformIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { PageSnapshot, TabAction, TabToolRequest, TabToolResponse } from "@/lib/tab-tools";
@@ -49,6 +49,7 @@ function Popup() {
   const [writtenMessage, setWrittenMessage] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
   const [resettingConversation, setResettingConversation] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   useEffect(() => {
     void sendVoice({ type: "voice-status" }).then(setVoice);
@@ -158,89 +159,139 @@ function Popup() {
     else setError(response.ok ? "No screenshot was returned." : response.error);
   }
 
+  const voiceActive = Boolean(voice && isActive(voice.state));
+  const microphoneSetup = new URLSearchParams(location.search).has("microphone");
+
   return (
-    <main className="p-6">
-      <header className="flex items-center gap-2.5">
-        <WaveformIcon size={26} weight="bold" className="text-primary" aria-hidden="true" />
-        <h1 className="text-lg font-semibold tracking-tight">VoiceAgent</h1>
-      </header>
-      {new URLSearchParams(location.search).has("microphone") && <p role="status" className="mt-4 text-sm leading-6">Click Start voice session below, then allow microphone access. Audio is sent to the selected voice provider while the session runs. You can close this tab after connecting.</p>}
-      <Separator className="my-6" />
-      <section aria-labelledby="starter-title">
-        <h2 id="starter-title" className="text-2xl font-semibold tracking-tight">Browser tools</h2>
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          Read the current page or test a page action. Access is granted only to the active tab when you open this popup.
-        </p>
-        <Button className="mt-5 w-full" onClick={inspectActiveTab} disabled={loadingPage}>
-          {loadingPage ? "Reading page…" : "Read active tab"}
-        </Button>
-        <Button variant="secondary" className="mt-2 w-full" onClick={captureActiveTab} disabled={capturing}>
-          {capturing ? "Capturing screenshot…" : "Capture visible tab"}
-        </Button>
-        {snapshot && <div className="mt-4 rounded-md border border-border p-3 text-xs leading-5">
-          <p className="font-semibold">{snapshot.title || "Untitled page"}</p>
-          <p className="truncate text-muted-foreground">{snapshot.url}</p>
-          <p className="mt-2 text-muted-foreground">{snapshot.text.slice(0, 360) || "No visible text"}</p>
-          <p className="mt-2 text-muted-foreground">{snapshot.interactiveElements.length} interactive elements found</p>
-        </div>}
-        {screenshot && <img className="mt-4 max-h-48 w-full rounded-md border border-border object-contain" src={screenshot} alt="Screenshot of the active browser tab" />}
-        <div className="mt-4 grid gap-2">
-          <input className="h-9 rounded-md border bg-background px-3 text-sm" value={selector} onChange={event => setSelector(event.target.value)} placeholder="CSS selector, e.g. button[type=submit]" aria-label="CSS selector" />
-          <input className="h-9 rounded-md border bg-background px-3 text-sm" value={text} onChange={event => setText(event.target.value)} placeholder="Text to enter" aria-label="Text to enter" />
-          <input className="h-9 rounded-md border bg-background px-3 text-sm" type="number" min="1" max="60" value={highlightSeconds} onChange={event => setHighlightSeconds(Number(event.target.value))} aria-label="Highlight duration in seconds" title="Highlight duration in seconds" />
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="secondary" onClick={() => act({ kind: "click", selector })} disabled={!selector}>Click</Button>
-            <Button variant="secondary" onClick={() => act({ kind: "type", selector, text })} disabled={!selector}>Type</Button>
-            <Button variant="secondary" onClick={() => act({ kind: "highlight", selector, label: text || undefined, durationSeconds: highlightSeconds })} disabled={!selector}>Highlight</Button>
-            <Button variant="secondary" onClick={() => act({ kind: "request-user-action", selector, message: text || "Bitte selbst klicken", durationSeconds: highlightSeconds })} disabled={!selector}>Ask user</Button>
-            <Button variant="secondary" onClick={() => act({ kind: "scroll", deltaY: 600 })}>Scroll</Button>
+    <main className="popup-shell p-4">
+      <header className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+            <WaveformIcon size={21} weight="bold" aria-hidden="true" />
+          </span>
+          <div>
+            <h1 className="text-base font-semibold tracking-tight">VoiceAgent</h1>
+            <p className="text-xs text-muted-foreground">Your browser, voice controlled</p>
           </div>
         </div>
-        <div className="mt-6 flex items-stretch gap-2">
-          <Button className="h-14 min-w-0 flex-1" onClick={toggleVoice} disabled={busy || sendingMessage}>
-            {voice && isActive(voice.state) ? <MicrophoneSlashIcon size={22} aria-hidden="true" /> : <MicrophoneIcon size={22} aria-hidden="true" />}
-            <span className="sr-only">{busy ? "Working" : voice && isActive(voice.state) ? "Stop voice session" : "Start voice session"}</span>
-          </Button>
-          <form className="flex min-w-0 flex-[2] gap-2" onSubmit={sendWrittenMessage}>
-            <input
-              className="min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
-              value={writtenMessage}
-              onChange={event => setWrittenMessage(event.target.value)}
-              placeholder="Write to the agent"
-              aria-label="Write to the agent"
-              disabled={busy || sendingMessage}
-            />
-            <Button type="submit" size="icon" aria-label="Send message" disabled={!writtenMessage.trim() || busy || sendingMessage}>
-              <PaperPlaneTiltIcon aria-hidden="true" />
-            </Button>
-          </form>
-        </div>
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">Speak or write — both continue the same browser-agent conversation.</p>
-        <Button variant="secondary" className="mt-3 w-full" onClick={startNewConversation} disabled={busy || sendingMessage || resettingConversation}>
-          <ArrowCounterClockwiseIcon aria-hidden="true" />
-          {resettingConversation ? "Starting new conversation…" : "New conversation"}
+        <Button variant="ghost" size="icon" onClick={openSettings} disabled={opening} aria-label="Open settings" title="Open settings">
+          <GearSixIcon className={opening ? "animate-spin" : ""} aria-hidden="true" />
         </Button>
-        {voice && (
-          <p role="status" className="mt-2 text-xs text-muted-foreground">
-            {VOICE_LABELS[voice.state]} · {voice.engine === "openrouter" ? "OpenRouter" : "ChatGPT"} engine
-          </p>
+      </header>
+
+      {microphoneSetup && (
+        <div role="status" className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs leading-5 text-muted-foreground">
+          Start the session and allow microphone access. You can close this tab after connecting.
+        </div>
+      )}
+
+      <section aria-labelledby="voice-title" className="voice-card mt-4 rounded-2xl border border-border/80 bg-background/90 p-5 shadow-sm">
+        <div className="flex items-center gap-3">
+          <span className={`voice-indicator ${voiceActive ? "voice-indicator-active" : ""}`} aria-hidden="true">
+            <span />
+          </span>
+          <div>
+            <h2 id="voice-title" className="text-lg font-semibold tracking-tight">
+              {voice ? VOICE_LABELS[voice.state] : "Ready to listen"}
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {voice ? `${voice.engine === "openrouter" ? "OpenRouter" : "ChatGPT"} voice engine` : "Start a hands-free browser session"}
+            </p>
+          </div>
+        </div>
+
+        <Button className={`mt-5 h-11 w-full rounded-xl ${voiceActive ? "bg-destructive hover:bg-destructive/90" : ""}`} onClick={toggleVoice} disabled={busy || sendingMessage}>
+          {voiceActive ? <MicrophoneSlashIcon aria-hidden="true" /> : <MicrophoneIcon weight="fill" aria-hidden="true" />}
+          {busy ? "Working…" : voiceActive ? "Stop voice session" : "Start voice session"}
+        </Button>
+
+        <form className="mt-3 flex gap-2" onSubmit={sendWrittenMessage}>
+          <input
+            className="h-10 min-w-0 flex-1 rounded-lg border bg-background px-3 text-sm"
+            value={writtenMessage}
+            onChange={event => setWrittenMessage(event.target.value)}
+            placeholder="Write to the agent"
+            aria-label="Write to the agent"
+            disabled={busy || sendingMessage}
+          />
+          <Button type="submit" size="icon" className="size-10 rounded-lg" aria-label="Send message" disabled={!writtenMessage.trim() || busy || sendingMessage}>
+            <PaperPlaneTiltIcon aria-hidden="true" />
+          </Button>
+        </form>
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <p className="text-[11px] leading-4 text-muted-foreground">Speak or write in the same conversation.</p>
+          <Button variant="ghost" size="sm" className="shrink-0" onClick={startNewConversation} disabled={busy || sendingMessage || resettingConversation}>
+            <ArrowCounterClockwiseIcon aria-hidden="true" />
+            {resettingConversation ? "Resetting…" : "New chat"}
+          </Button>
+        </div>
+
+        {(voice?.transcript || voice?.reply) && (
+          <div className="mt-4 max-h-28 space-y-2 overflow-y-auto rounded-lg bg-secondary/60 p-3 text-xs leading-5">
+            {voice.transcript && <p><span className="font-semibold">You:</span> {voice.transcript}</p>}
+            {voice.reply && <p><span className="font-semibold">Agent:</span> {voice.reply}</p>}
+          </div>
         )}
         {voice?.levels && (
-          <p className="mt-1 font-mono text-[11px] leading-4 text-muted-foreground">
+          <p className="mt-2 font-mono text-[10px] leading-4 text-muted-foreground">
             mic {voice.levels.rms.toFixed(4)} · room {voice.levels.floor.toFixed(4)} · needs {voice.levels.onsetRms.toFixed(4)}
           </p>
         )}
-        {voice?.transcript && <p className="mt-3 text-xs leading-5"><span className="font-semibold">You:</span> {voice.transcript}</p>}
-        {voice?.reply && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Agent:</span> {voice.reply}</p>}
         {voice?.error && <p role="alert" className="mt-3 text-sm leading-5 text-destructive">{voice.error}</p>}
-        <Button className="mt-6 w-full" onClick={openSettings} disabled={opening}>
-          <GearSixIcon aria-hidden="true" />
-          {opening ? "Opening settings…" : "Open settings"}
-          <ArrowUpRightIcon className="ml-auto" aria-hidden="true" />
-        </Button>
         {error && <p role="alert" className="mt-3 text-sm leading-5 text-destructive">{error}</p>}
       </section>
-      <p className="mt-5 text-xs leading-5 text-muted-foreground">The microphone is used only while a voice session is running · Password fields are protected</p>
+
+      <section className="mt-3 overflow-hidden rounded-xl border border-border/80 bg-background/75">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium hover:bg-secondary/60"
+          onClick={() => setToolsOpen(open => !open)}
+          aria-expanded={toolsOpen}
+          aria-controls="browser-tools"
+        >
+          Browser tools
+          <CaretDownIcon className={`transition-transform ${toolsOpen ? "rotate-180" : ""}`} aria-hidden="true" />
+        </button>
+        {toolsOpen && (
+          <div id="browser-tools" className="border-t border-border px-4 pb-4 pt-3">
+            <p className="text-xs leading-5 text-muted-foreground">
+              Inspect the active page or test a browser action.
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button size="sm" onClick={inspectActiveTab} disabled={loadingPage}>
+                {loadingPage ? "Reading…" : "Read active tab"}
+              </Button>
+              <Button size="sm" variant="secondary" onClick={captureActiveTab} disabled={capturing}>
+                {capturing ? "Capturing…" : "Capture tab"}
+              </Button>
+            </div>
+            {snapshot && <div className="mt-3 rounded-md border border-border p-3 text-xs leading-5">
+              <p className="font-semibold">{snapshot.title || "Untitled page"}</p>
+              <p className="truncate text-muted-foreground">{snapshot.url}</p>
+              <p className="mt-2 text-muted-foreground">{snapshot.text.slice(0, 360) || "No visible text"}</p>
+              <p className="mt-2 text-muted-foreground">{snapshot.interactiveElements.length} interactive elements found</p>
+            </div>}
+            {screenshot && <img className="mt-3 max-h-48 w-full rounded-md border border-border object-contain" src={screenshot} alt="Screenshot of the active browser tab" />}
+            <Separator className="my-3" />
+            <div className="grid gap-2">
+              <input className="h-9 rounded-md border bg-background px-3 text-sm" value={selector} onChange={event => setSelector(event.target.value)} placeholder="CSS selector" aria-label="CSS selector" />
+              <input className="h-9 rounded-md border bg-background px-3 text-sm" value={text} onChange={event => setText(event.target.value)} placeholder="Text to enter" aria-label="Text to enter" />
+              <input className="h-9 rounded-md border bg-background px-3 text-sm" type="number" min="1" max="60" value={highlightSeconds} onChange={event => setHighlightSeconds(Number(event.target.value))} aria-label="Highlight duration in seconds" title="Highlight duration in seconds" />
+              <div className="grid grid-cols-2 gap-2">
+                <Button size="sm" variant="secondary" onClick={() => act({ kind: "click", selector })} disabled={!selector}>Click</Button>
+                <Button size="sm" variant="secondary" onClick={() => act({ kind: "type", selector, text })} disabled={!selector}>Type</Button>
+                <Button size="sm" variant="secondary" onClick={() => act({ kind: "highlight", selector, label: text || undefined, durationSeconds: highlightSeconds })} disabled={!selector}>Highlight</Button>
+                <Button size="sm" variant="secondary" onClick={() => act({ kind: "request-user-action", selector, message: text || "Bitte selbst klicken", durationSeconds: highlightSeconds })} disabled={!selector}>Ask user</Button>
+                <Button size="sm" variant="secondary" onClick={() => act({ kind: "scroll", deltaY: 600 })}>Scroll</Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <p className="mt-3 px-2 text-center text-[11px] leading-4 text-muted-foreground">
+        Microphone active only during a session · Passwords protected
+      </p>
     </main>
   );
 }
