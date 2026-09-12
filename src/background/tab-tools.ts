@@ -7,7 +7,7 @@
  * through a message.
  */
 
-import type { AutomationProgram, AutomationResult, InteractiveElement, PageSnapshot, TabAction, TabToolResponse } from "@/lib/tab-tools";
+import type { AutomationProgram, AutomationResult, FrameSnapshot, InteractiveElement, PageSnapshot, TabAction, TabToolResponse } from "@/lib/tab-tools";
 import type { ToolDefinition } from "@/live/openrouter/client";
 import { formatParsedTable, parseDelimitedText } from "./data-tools";
 import { formatParsedPdf, readPdfFromUrl } from "./pdf-tools";
@@ -42,7 +42,7 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
   },
   {
     name: "inspect-active-tab",
-    description: "Read the visible text, title, URL, and interactive controls of the browser tab the user is looking at.",
+    description: "Read the visible text, title, URL, and interactive controls of the active tab, including accessible same-origin iframes and open Shadow DOM controls. Iframe results include a frameId for targeted actions.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -59,6 +59,7 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
         selector: { type: "string", description: "Optional CSS selector to wait for." },
         text: { type: "string", description: "Optional visible text to wait for." },
         timeoutMs: { type: "number", description: "Wait time from 250 to 30000 milliseconds; defaults to 10000." },
+        frameId: { type: "number", description: "Optional frameId returned by inspect-active-tab." },
       },
       additionalProperties: false,
     },
@@ -73,6 +74,7 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
           type: "object",
           properties: {
             steps: { type: "array", description: "At most 25 declarative steps. for-each supports operation click or read and max 50 matches." },
+            frameId: { type: "number", description: "Optional iframe id returned by inspect-active-tab." },
           },
           required: ["steps"],
           additionalProperties: false,
@@ -103,6 +105,7 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
         label: { type: "string", description: "Optional short caption for a highlight." },
         message: { type: "string", description: "What the user should do. Required for request-user-action." },
         durationSeconds: { type: "number", description: "How long a highlight or request stays on screen, 1 to 60 seconds. Defaults to 8." },
+        frameId: { type: "number", description: "Optional iframe id returned by inspect-active-tab." },
       },
       required: ["kind"],
       additionalProperties: false,
@@ -130,15 +133,16 @@ export async function handleTabToolRequest(request: { type: string; action?: Tab
     }
 
     if (request.type === "inspect-active-tab") {
-      const result = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: inspectPage });
-      const snapshot = result[0]?.result as PageSnapshot | undefined;
-      return snapshot ? { ok: true, snapshot } : { ok: false, error: "The page returned no readable content." };
+      const result = await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: inspectPage });
+      const frames = result.flatMap(item => item.result ? [{ frameId: item.frameId, page: item.result as PageSnapshot }] : []) as FrameSnapshot[];
+      const snapshot = frames.find(frame => frame.frameId === 0)?.page;
+      return snapshot ? { ok: true, snapshot, frames } : { ok: false, error: "The page returned no readable content." };
     }
 
     if (request.type === "wait-for-active-tab") {
-      const waiting = request as { selector?: string; text?: string; timeoutMs?: number };
+      const waiting = request as { selector?: string; text?: string; timeoutMs?: number; frameId?: number };
       const result = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
+        target: { tabId: tab.id, ...(Number.isInteger(waiting.frameId) ? { frameIds: [waiting.frameId!] } : {}) },
         func: waitForPageState,
         args: [waiting.selector, waiting.text, waiting.timeoutMs],
       });
@@ -148,9 +152,9 @@ export async function handleTabToolRequest(request: { type: string; action?: Tab
 
     if (request.type === "run-automation") {
       if (!request.program) return { ok: false, error: "Automation needs a program." };
-      const result = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: runAutomation, args: [request.program] });
+      const result = await chrome.scripting.executeScript({ target: { tabId: tab.id, ...(Number.isInteger(request.program.frameId) ? { frameIds: [request.program.frameId!] } : {}) }, func: runAutomation, args: [request.program] });
       const automation = result[0]?.result as AutomationResult | undefined;
-      const inspected = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: inspectPage });
+      const inspected = await chrome.scripting.executeScript({ target: { tabId: tab.id, ...(Number.isInteger(request.program.frameId) ? { frameIds: [request.program.frameId!] } : {}) }, func: inspectPage });
       const snapshot = inspected[0]?.result as PageSnapshot | undefined;
       return automation && snapshot ? { ok: true, automation, snapshot, message: "Automation completed and the page was checked." } : { ok: false, error: "The automation did not return a valid result." };
     }
@@ -158,7 +162,7 @@ export async function handleTabToolRequest(request: { type: string; action?: Tab
     const action = request.action;
     if (!action) return { ok: false, error: "That action needs a kind." };
     const result = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: { tabId: tab.id, ...(Number.isInteger(action.frameId) ? { frameIds: [action.frameId!] } : {}) },
       func: performAction,
       args: [action],
     });
@@ -217,7 +221,9 @@ export async function executeBrowserTool(name: string, args: string): Promise<st
     if (!response.ok) return response.error;
     if (name === "capture-active-tab") return response.screenshot ? "Captured a screenshot of the visible tab." : "The screenshot was empty.";
     if (name === "wait-for-active-tab") return response.message ?? "Finished waiting.";
-    return response.snapshot ? formatSnapshot(response.snapshot) : "The page had no readable content.";
+    if (!response.snapshot) return "The page had no readable content.";
+    const frames = response.frames?.filter(frame => frame.frameId !== 0).map(frame => `\nIframe ${frame.frameId}:\n${formatSnapshot(frame.page)}`).join("\n") ?? "";
+    return `${formatSnapshot(response.snapshot)}${frames}`;
   }
 
   if (name === "run-automation") {
@@ -242,13 +248,18 @@ export async function executeBrowserTool(name: string, args: string): Promise<st
 
 function inspectPage(): PageSnapshot {
   const selectorFor = (element: Element): string => {
-    if (element.id) return `#${CSS.escape(element.id)}`;
+    const root = element.getRootNode();
+    const prefix = root instanceof ShadowRoot ? `${selectorFor(root.host)} >>> ` : "";
+    if (element.id) return `${prefix}#${CSS.escape(element.id)}`;
     const name = element.getAttribute("name");
-    if (name) return `${element.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
+    if (name) return `${prefix}${element.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
     const testId = element.getAttribute("data-testid");
-    if (testId) return `[data-testid="${CSS.escape(testId)}"]`;
+    if (testId) return `${prefix}[data-testid="${CSS.escape(testId)}"]`;
     const parent = element.parentElement;
-    if (!parent) return element.tagName.toLowerCase();
+    if (!parent) {
+      if (root instanceof ShadowRoot) return `${selectorFor(root.host)} >>> ${element.tagName.toLowerCase()}`;
+      return element.tagName.toLowerCase();
+    }
     const siblings = [...parent.children].filter(child => child.tagName === element.tagName);
     return `${selectorFor(parent)} > ${element.tagName.toLowerCase()}:nth-of-type(${siblings.indexOf(element) + 1})`;
   };
@@ -257,7 +268,12 @@ function inspectPage(): PageSnapshot {
     const text = (element as HTMLElement).innerText || element.getAttribute("placeholder") || element.getAttribute("title") || "";
     return (aria || text).replace(/\s+/g, " ").trim().slice(0, 160);
   };
-  const interactiveElements: InteractiveElement[] = [...document.querySelectorAll("a, button, input, textarea, select, [role='button'], [contenteditable='true']")]
+  const interactiveSelector = "a, button, input, textarea, select, [role='button'], [contenteditable='true']";
+  const roots: ParentNode[] = [document];
+  for (let index = 0; index < roots.length; index++) {
+    for (const element of roots[index]!.querySelectorAll("*")) if (element.shadowRoot) roots.push(element.shadowRoot);
+  }
+  const interactiveElements: InteractiveElement[] = roots.flatMap(root => [...root.querySelectorAll(interactiveSelector)])
     .filter(element => {
       const style = getComputedStyle(element);
       return style.display !== "none" && style.visibility !== "hidden";
@@ -297,7 +313,19 @@ function inspectPage(): PageSnapshot {
 
 function waitForPageState(selector: string | undefined, text: string | undefined, timeoutMs: number | undefined): Promise<boolean> {
   const limit = Math.max(250, Math.min(30_000, Number.isFinite(timeoutMs) ? timeoutMs! : 10_000));
-  const matches = () => (!selector || !!document.querySelector(selector)) && (!text || document.body?.innerText.includes(text));
+  const find = (value: string) => {
+    const parts = value.split(/\s*>>>\s*/);
+    let root: Document | ShadowRoot = document;
+    let element: Element | null = null;
+    for (const [index, part] of parts.entries()) {
+      element = root.querySelector(part);
+      if (!element || index === parts.length - 1) return element;
+      if (!element.shadowRoot) return null;
+      root = element.shadowRoot;
+    }
+    return element;
+  };
+  const matches = () => (!selector || !!find(selector)) && (!text || document.body?.innerText.includes(text));
   if (matches()) return Promise.resolve(true);
   return new Promise(resolve => {
     const observer = new MutationObserver(() => {
@@ -315,6 +343,18 @@ function waitForPageState(selector: string | undefined, text: string | undefined
 }
 
 function performAction(action: TabAction): string {
+  const find = (selector: string) => {
+    const parts = selector.split(/\s*>>>\s*/);
+    let root: Document | ShadowRoot = document;
+    let element: Element | null = null;
+    for (const [index, part] of parts.entries()) {
+      element = root.querySelector(part);
+      if (!element || index === parts.length - 1) return element;
+      if (!element.shadowRoot) return null;
+      root = element.shadowRoot;
+    }
+    return element;
+  };
   const durationFor = (value: number | undefined) => {
     const requestedDuration = value ?? 8;
     return Number.isFinite(requestedDuration) ? Math.max(1, Math.min(60, requestedDuration)) : 8;
@@ -362,7 +402,7 @@ function performAction(action: TabAction): string {
 
   const selector = action.selector;
   if (!selector) throw new Error("This action requires a selector.");
-  const element = document.querySelector(selector);
+  const element = find(selector);
   if (!element) throw new Error(`No element matches ${selector}.`);
 
   if (action.kind === "highlight") {

@@ -66,6 +66,8 @@ For repetitive work, `run-automation` accepts a small declarative program with `
 
 `read-pdf` fetches an http(s) PDF and extracts its text locally with PDF.js (up to 20 MB, 40 pages, and 100,000 characters). `download-file` saves an http(s) URL with a safe relative path such as `Classroom/Math/week-03/worksheet.pdf`; Chrome never overwrites an existing file.
 
+Tab inspection traverses open Shadow DOM trees and emits selectors using `>>>` for shadow boundaries. It also inspects scriptable iframes and returns their `frameId`; pass that frame ID to tab actions, waiting, or automation when a control belongs to an iframe. Closed Shadow DOMs and frames that Chrome does not permit the extension to script remain unavailable.
+
 ### Browser-agent roadmap
 
 Implemented model tools are: inspection, visible-tab capture, dynamic waiting, bounded repetitive automation, and direct tab actions. The remaining capabilities are document download/parse/upload, full-page capture, open Shadow DOM and same-origin iframe traversal, cookie-banner guidance, structured extraction, and cross-tab workflows. Full Chrome Debugger accessibility/network inspection is intentionally deferred because it carries substantially broader page-debugging access than the current tools.
