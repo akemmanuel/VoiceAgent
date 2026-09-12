@@ -50,6 +50,12 @@ scripts/
 
 The build copies HTML templates and public files into `dist/`, bundles JavaScript with Bun, and compiles Tailwind separately. HTML templates reference the resulting JavaScript and CSS files. The build deletes and recreates only `dist/`.
 
+## Responsibilities
+
+- **akemmanuel** — Builds the tool that lets the agent run arbitrary sandboxed JavaScript.
+- **carlosmintfan** — Builds the connection to ChatGPT for using GPT Live.
+- **Pascal-Thommen** — Builds the UI and the connection to the browser tabs.
+
 ## Scope
 
 The popup opens settings and displays an error if that action fails. The settings page is an empty state, not a working voice configuration form. The worker is an entry point for future event listeners.
@@ -59,3 +65,7 @@ No voice recording, content scripts, storage, network calls, or browser permissi
 ## Verification
 
 The initial build loaded in Chromium. Both pages passed axe with zero violations, and the settings API resolved successfully. The popup was visually checked. Settings-page screenshots were blank or timed out, so its visual review remains incomplete. Edge has not been tested.
+
+## License
+
+MIT No Attribution. See [LICENSE](LICENSE).

@@ -9,6 +9,7 @@
   },
   "type": "module",
   "private": true,
+  "license": "MIT-0",
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
     "@types/bun": "latest",
