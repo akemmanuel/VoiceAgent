@@ -5,6 +5,7 @@ import { Separator } from "@/components/ui/separator";
 import { AccountSection } from "./account";
 import { EngineSection } from "./engine";
 import { OpenRouterSection } from "./openrouter";
+import { VoiceConfigurationSection } from "./voice";
 
 function Options() {
   return (
@@ -22,12 +23,7 @@ function Options() {
       <Separator className="my-8" />
       <OpenRouterSection />
       <Separator className="my-8" />
-      <section aria-labelledby="voice-title">
-        <h2 id="voice-title" className="text-lg font-semibold">Voice configuration</h2>
-        <p className="mt-3 max-w-prose text-sm leading-6 text-muted-foreground">
-          Voice preferences aren't implemented yet. The popup's tab controls use temporary access to the active tab, and this page keeps your ChatGPT tokens in local extension storage.
-        </p>
-      </section>
+      <VoiceConfigurationSection />
       <Separator className="my-8" />
       <footer className="text-sm leading-6 text-muted-foreground">You can close this tab and return to the extension popup.</footer>
     </main>

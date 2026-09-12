@@ -1,4 +1,5 @@
 import { decodeLiveEvent, unavailableDelegation } from "@/live/chatgpt/call";
+import type { ChatGPTVoice } from "@/live/settings";
 
 /** One WebRTC call. Server VAD handles speech boundaries; no local recorder or STT. */
 export class ChatGPTCall {
@@ -89,6 +90,14 @@ export class ChatGPTCall {
       }
       throw cause;
     }
+  }
+
+  updateVoice(voice: ChatGPTVoice): void {
+    if (this.closed || this.channel?.readyState !== "open") return;
+    this.channel.send(JSON.stringify({
+      type: "session.update",
+      session: { audio: { output: { voice } } },
+    }));
   }
 
   private receive(raw: string) {

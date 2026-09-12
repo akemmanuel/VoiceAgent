@@ -181,6 +181,9 @@ async function handleCommand(command: OffscreenCommand): Promise<void> {
       await call.start();
       return;
     }
+    case "chatgpt-voice":
+      liveCall?.updateVoice(command.voice);
+      return;
     case "listen":
       await startListening();
       return;

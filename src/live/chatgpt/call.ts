@@ -1,3 +1,4 @@
+import type { ChatGPTVoice } from "../settings";
 import type { FetchLike } from "../auth/oauth";
 
 export const CALL_URL = "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas";
@@ -7,6 +8,7 @@ export async function negotiateCall(
   sdp: string,
   credentials: { accessToken: string; accountId: string | null },
   signal: AbortSignal,
+  voice: ChatGPTVoice,
   fetchImpl: FetchLike = fetch,
 ): Promise<string> {
   const response = await fetchImpl(CALL_URL, {
@@ -24,7 +26,7 @@ export async function negotiateCall(
       session: {
         model: "gpt-live-1-codex",
         instructions: "You are VoiceAgent, a voice assistant in a browser extension. Speak naturally and briefly. For browser tasks, delegate to the client. Never claim an action succeeded until its result returns. The client currently reports when a task cannot be performed.",
-        audio: { output: { voice: "cove" } },
+        audio: { output: { voice } },
         delegation: { type: "client", ack_filler: true },
       },
     }),

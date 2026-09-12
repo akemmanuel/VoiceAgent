@@ -4,12 +4,13 @@
  * `runtime.onMessage` channel that the tab tools already use.
  */
 
-import type { VoiceEngine } from "@/live/settings";
+import type { ChatGPTVoice, VoiceEngine } from "@/live/settings";
 import type { ConversationState } from "@/live/voice/conversation";
 
 /** Worker to offscreen document. */
 export type OffscreenCommand =
   | { target: "offscreen"; type: "chatgpt-start"; sessionId: string }
+  | { target: "offscreen"; type: "chatgpt-voice"; voice: ChatGPTVoice }
   | { target: "offscreen"; type: "listen" }
   /** Abandon the recording in progress without transcribing it. */
   | { target: "offscreen"; type: "discard-recording" }
@@ -28,6 +29,8 @@ export type OffscreenEvent =
   | { source: "offscreen"; type: "failed"; message: string };
 
 export type VoiceRequest = { type: "voice-start" } | { type: "voice-stop" } | { type: "voice-status" };
+
+export type VoiceSettingsChangedMessage = { type: "voice-settings-changed" };
 
 export type VoiceStatus = {
   state: ConversationState;

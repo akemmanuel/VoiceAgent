@@ -1,6 +1,6 @@
 import type { TabToolRequest } from "@/lib/tab-tools";
 import { isOffscreenEvent, isVoiceRequest } from "@/live/voice/protocol";
-import { handleChatGPTMessage, handleOffscreenEvent, handleVoiceRequest } from "./live";
+import { handleChatGPTMessage, handleOffscreenEvent, handleVoiceRequest, handleVoiceSettingsChanged } from "./live";
 import { handleTabToolRequest } from "./tab-tools";
 
 const TAB_TOOL_TYPES = ["inspect-active-tab", "capture-active-tab", "wait-for-active-tab", "run-automation", "act-on-active-tab"];
@@ -16,6 +16,11 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   }
   if (isVoiceRequest(message)) {
     void handleVoiceRequest(message).then(sendResponse).catch(cause => sendResponse({ state: "failed", engine: "chatgpt", transcript: "", reply: "", error: cause instanceof Error ? cause.message : "Voice request failed." }));
+    return true;
+  }
+
+  if (record?.type === "voice-settings-changed") {
+    void handleVoiceSettingsChanged().then(() => sendResponse({ ok: true }), cause => sendResponse({ ok: false, error: cause instanceof Error ? cause.message : "Voice settings could not be applied." }));
     return true;
   }
 

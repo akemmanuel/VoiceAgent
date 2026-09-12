@@ -16,7 +16,7 @@ import type { ChatMessage } from "@/live/openrouter/client";
 import { createChatCompletion, createSpeech, createTranscription } from "@/live/openrouter/client";
 import { fetchSpeechModels, type CatalogModel } from "@/live/openrouter/catalog";
 import { effectiveVoice, readOpenRouterSettings, reasoningOption } from "@/live/openrouter/settings";
-import { readEngine, type VoiceEngine } from "@/live/settings";
+import { readChatGPTVoice, readEngine, type VoiceEngine } from "@/live/settings";
 import { bytesToBase64 } from "@/live/voice/audio-codec";
 import { isActive, reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "@/live/voice/conversation";
 import type { OffscreenCommand, OffscreenEvent, VoiceRequest, VoiceStatus } from "@/live/voice/protocol";
@@ -203,6 +203,14 @@ async function dispatch(event: VoiceEvent): Promise<void> {
   await broadcast();
 }
 
+export async function handleVoiceSettingsChanged(): Promise<void> {
+  engine = await readEngine();
+  if (engine === "chatgpt" && isActive(state) && await chrome.offscreen.hasDocument()) {
+    await sendToOffscreen({ target: "offscreen", type: "chatgpt-voice", voice: await readChatGPTVoice() });
+  }
+  await broadcast();
+}
+
 export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceStatus> {
   switch (request.type) {
     case "voice-status":
@@ -253,9 +261,9 @@ export async function handleChatGPTMessage(message: Record<string, unknown>): Pr
     if (message.type === "chatgpt-offer") {
       if (typeof message.sdp !== "string" || message.sdp.length > 100_000) throw new Error("Invalid voice offer.");
       const signal = AbortSignal.any([sessionAbort!.signal, AbortSignal.timeout(30_000)]);
-      const credentials = await getAccessToken();
+      const [credentials, voice] = await Promise.all([getAccessToken(), readChatGPTVoice()]);
       signal.throwIfAborted();
-      const answer = await negotiateCall(message.sdp, credentials, signal);
+      const answer = await negotiateCall(message.sdp, credentials, signal, voice);
       return sessionId === id ? { ok: true, answer } : { ok: false, error: "Voice session ended." };
     }
     if (message.kind === "failed") {

@@ -6,8 +6,12 @@ Manifest V3 browser extension starter for Chrome and Edge. Uses React, TypeScrip
 
 ```bash
 bun install
-bun run build
+bun run dev
 ```
+
+`bun run dev` builds the extension and launches a separate Chrome/Edge development profile with `dist/` loaded. Use `bun run open` to reopen the existing build without rebuilding. Set `BROWSER_PATH` if the browser executable is not detected automatically.
+
+To load it manually, run `bun run build`, then:
 
 1. Open `chrome://extensions` or `edge://extensions`.
 2. Turn on Developer mode.
