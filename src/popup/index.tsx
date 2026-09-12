@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowCounterClockwiseIcon, CaretDownIcon, DownloadSimpleIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, PaperPlaneTiltIcon, WaveformIcon } from "@phosphor-icons/react";
+import { ArrowCounterClockwiseIcon, CaretDownIcon, DownloadSimpleIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, PaperPlaneTiltIcon, SpinnerGapIcon, WaveformIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { PageSnapshot, TabAction, TabToolRequest, TabToolResponse } from "@/lib/tab-tools";
@@ -186,10 +186,10 @@ function Popup() {
   const microphoneSetup = new URLSearchParams(location.search).has("microphone");
 
   return (
-    <main className="popup-shell p-4">
-      <header className="flex items-center justify-between">
+    <main className="popup-shell p-4" data-voice-state={voice?.state ?? "idle"}>
+      <header className="app-header flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+          <span className="brand-mark flex size-9 items-center justify-center rounded-xl text-primary-foreground">
             <WaveformIcon size={21} weight="bold" aria-hidden="true" />
           </span>
           <div>
@@ -208,19 +208,25 @@ function Popup() {
         </div>
       )}
 
-      <section aria-labelledby="voice-title" className="voice-card mt-4 rounded-2xl border border-border/80 bg-background/90 p-5 shadow-sm">
+      <section aria-labelledby="voice-title" className="voice-card mt-4 rounded-2xl p-5" aria-live="polite">
         <div className="flex items-center gap-3">
-          <span className={`voice-indicator ${voiceActive ? "voice-indicator-active" : ""}`} aria-hidden="true">
-            <span />
+          <span className={`voice-orb ${voiceActive ? "voice-orb-active" : ""}`} aria-hidden="true">
+            <span className="voice-bars">
+              <span /><span /><span /><span /><span />
+            </span>
           </span>
-          <div>
+          <div className="min-w-0 flex-1">
             <h2 id="voice-title" className="text-lg font-semibold tracking-tight">
               {voice ? VOICE_LABELS[voice.state] : "Ready to listen"}
             </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
               {voice ? `${voice.engine === "openrouter" ? "OpenRouter" : "ChatGPT"} voice engine` : "Start a hands-free browser session"}
             </p>
           </div>
+          <span className={`status-chip ${voiceActive ? "status-chip-active" : ""}`}>
+            <span aria-hidden="true" />
+            {voiceActive ? "Live" : "Ready"}
+          </span>
         </div>
 
         <Button className={`mt-5 h-11 w-full rounded-xl ${voiceActive ? "bg-destructive hover:bg-destructive/90" : ""}`} onClick={toggleVoice} disabled={busy || sendingMessage}>
@@ -237,8 +243,8 @@ function Popup() {
             aria-label="Write to the agent"
             disabled={busy || sendingMessage}
           />
-          <Button type="submit" size="icon" className="size-10 rounded-lg" aria-label="Send message" disabled={!writtenMessage.trim() || busy || sendingMessage}>
-            <PaperPlaneTiltIcon aria-hidden="true" />
+          <Button type="submit" size="icon" className="send-button size-10 rounded-lg" aria-label="Send message" disabled={!writtenMessage.trim() || busy || sendingMessage}>
+            {sendingMessage ? <SpinnerGapIcon className="animate-spin" aria-hidden="true" /> : <PaperPlaneTiltIcon aria-hidden="true" />}
           </Button>
         </form>
         <div className="mt-2 flex items-center justify-between gap-3">
@@ -250,7 +256,7 @@ function Popup() {
         </div>
 
         {(voice?.transcript || voice?.reply) && (
-          <div className="mt-4 max-h-28 space-y-2 overflow-y-auto rounded-lg bg-secondary/60 p-3 text-xs leading-5">
+          <div className="conversation-feed mt-4 max-h-28 space-y-2 overflow-y-auto rounded-lg p-3 text-xs leading-5">
             {voice.transcript && <p><span className="font-semibold">You:</span> {voice.transcript}</p>}
             {voice.reply && <p><span className="font-semibold">Agent:</span> {voice.reply}</p>}
           </div>
@@ -261,7 +267,7 @@ function Popup() {
           </p>
         )}
         {voice?.activity.length ? (
-          <details className="mt-3 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-xs" open={voice.activity.some(entry => entry.failed)}>
+          <details className="notice-enter mt-3 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-xs" open={voice.activity.some(entry => entry.failed)}>
             <summary className="cursor-pointer font-medium">Agent activity ({voice.activity.length})</summary>
             <ol className="mt-2 space-y-2 border-t border-border pt-2 text-muted-foreground">
               {voice.activity.map((entry, index) => (
@@ -278,8 +284,8 @@ function Popup() {
           {exportingDebug ? "Preparing debug report…" : "Download debug report"}
         </Button>
         <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground">Includes local page and conversation data; review it before sharing.</p>
-        {voice?.error && <p role="alert" className="mt-3 text-sm leading-5 text-destructive">{voice.error}</p>}
-        {error && <p role="alert" className="mt-3 text-sm leading-5 text-destructive">{error}</p>}
+        {voice?.error && <p role="alert" className="notice-enter mt-3 text-sm leading-5 text-destructive">{voice.error}</p>}
+        {error && <p role="alert" className="notice-enter mt-3 text-sm leading-5 text-destructive">{error}</p>}
       </section>
 
       <section className="mt-3 overflow-hidden rounded-xl border border-border/80 bg-background/75">
@@ -294,7 +300,7 @@ function Popup() {
           <CaretDownIcon className={`transition-transform ${toolsOpen ? "rotate-180" : ""}`} aria-hidden="true" />
         </button>
         {toolsOpen && (
-          <div id="browser-tools" className="border-t border-border px-4 pb-4 pt-3">
+          <div id="browser-tools" className="tools-content border-t border-border px-4 pb-4 pt-3">
             <p className="text-xs leading-5 text-muted-foreground">
               Inspect the active page or test a browser action.
             </p>
