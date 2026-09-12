@@ -16,6 +16,24 @@ describe("browser tool contract", () => {
     const automation = BROWSER_TOOLS.find(tool => tool.name === "run-automation");
     expect(automation?.description).toContain("no-network");
     expect(automation?.description).toContain("final");
+    expect(automation?.description).toContain("`op`");
+    expect(BROWSER_TOOLS.find(tool => tool.name === "capture-active-tab")?.description).toContain("not available");
+  });
+
+  test("ranks visible page actions ahead of sidebar controls", () => {
+    const hiddenNavigation = Array.from({ length: 45 }, (_, index) => ({
+      selector: `#nav-${index}`, tag: "a", role: null, label: `Navigation ${index}`, visible: false, occluded: false,
+      disabled: false, checked: null, expanded: null, bounds: { x: 0, y: -1, width: 1, height: 1 },
+    }));
+    const text = formatSnapshot({
+      title: "Updates", url: "https://example.test/updates", text: "One update is available.",
+      viewport: { width: 1280, height: 720, scrollX: 0, scrollY: 0 },
+      interactiveElements: [...hiddenNavigation, {
+        selector: "#app-list-update-all", tag: "button", role: null, label: "Update", visible: true, occluded: false,
+        disabled: false, checked: null, expanded: null, bounds: { x: 500, y: 100, width: 120, height: 32 },
+      }],
+    });
+    expect(text).toContain('#app-list-update-all — button "Update"');
   });
 
   test("formats state needed for reliable follow-up actions", () => {

@@ -23,9 +23,9 @@ import { effectiveVoice, readOpenRouterSettings, reasoningOption } from "@/live/
 import { readEngine, type VoiceEngine } from "@/live/settings";
 import { bytesToBase64 } from "@/live/voice/audio-codec";
 import { isActive, reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "@/live/voice/conversation";
-import type { OffscreenCommand, OffscreenEvent, VoiceRequest, VoiceStatus } from "@/live/voice/protocol";
+import type { AgentActivity, OffscreenCommand, OffscreenEvent, VoiceDebugReport, VoiceRequest, VoiceStatus } from "@/live/voice/protocol";
 import { runTurn, systemMessage } from "@/live/voice/turn";
-import { BROWSER_TOOLS, executeBrowserTool } from "./tab-tools";
+import { BROWSER_TOOLS, executeBrowserTool, getLastObservedPage } from "./tab-tools";
 
 const OFFSCREEN_PATH = "offscreen/index.html";
 
@@ -35,6 +35,7 @@ let error: string | null = null;
 let transcript = "";
 let reply = "";
 let history: ChatMessage[] = [];
+let activity: AgentActivity[] = [];
 let turnAbort: AbortController | null = null;
 let sessionId: string | null = null;
 let sessionAbort: AbortController | null = null;
@@ -47,7 +48,18 @@ function messageOf(cause: unknown, fallback: string): string {
 }
 
 function status(): VoiceStatus {
-  return { state, engine, transcript, reply, error };
+  return { state, engine, transcript, reply, error, activity };
+}
+
+function recordActivity(tool: string, outcome: string): void {
+  const failed = /^(the tool failed|selector was not|no active|the page did not|the automation did not|no element|unsupported|timed out)/i.test(outcome);
+  const kind: AgentActivity["kind"] = ["inspect-active-tab", "capture-active-tab", "wait-for-active-tab"].includes(tool) ? "page-read" : "tool";
+  activity = [...activity, {
+    kind,
+    tool,
+    outcome: outcome.replace(/\s+/g, " ").trim().slice(0, 300),
+    failed,
+  }].slice(-50);
 }
 
 async function broadcast(): Promise<void> {
@@ -113,7 +125,11 @@ async function runVoiceTurn(userText: string): Promise<void> {
             reasoning: reasoningOption(settings),
             signal: controller.signal,
           }),
-        executeTool: executeBrowserTool,
+        executeTool: async (name, args) => {
+          const result = await executeBrowserTool(name, args);
+          recordActivity(name, result);
+          return result;
+        },
       },
       // The system prompt is seeded once and stays at the head of the history.
       history.length > 0 ? history : [systemMessage(BROWSER_TOOLS)],
@@ -227,6 +243,7 @@ export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceSt
       engine = await readEngine();
       log("info", "voice", "session-started", { sessionId: id, kind: engine });
       history = [];
+      activity = [];
       transcript = "";
       reply = "";
       await broadcast();
@@ -268,7 +285,23 @@ export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceSt
       log("info", "voice", "stop-requested", { sessionId });
       await dispatch({ type: "stop" });
       return status();
+
+    // This request is normally intercepted by background/index.ts because it
+    // returns a different payload shape. Keep the voice endpoint total too.
+    case "voice-debug-report":
+      return status();
   }
+}
+
+/** The popup copies this locally; no debug data is uploaded or downloaded. */
+export function handleVoiceDebugReport(): VoiceDebugReport {
+  return {
+    generatedAt: new Date().toISOString(),
+    extensionVersion: chrome.runtime.getManifest().version,
+    status: status(),
+    conversationHistory: history,
+    activePage: getLastObservedPage(),
+  };
 }
 
 /** Called only for messages from our own offscreen document. */

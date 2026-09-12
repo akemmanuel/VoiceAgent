@@ -7,6 +7,13 @@
 import type { VoiceEngine } from "@/live/settings";
 import type { ConversationState } from "@/live/voice/conversation";
 
+export type AgentActivity = {
+  kind: "page-read" | "tool";
+  tool: string;
+  outcome: string;
+  failed: boolean;
+};
+
 /** Worker to offscreen document. */
 export type OffscreenCommand =
   | { target: "offscreen"; type: "chatgpt-start"; sessionId: string }
@@ -28,7 +35,7 @@ export type OffscreenEvent =
   | { source: "offscreen"; type: "playback-end" }
   | { source: "offscreen"; type: "failed"; message: string };
 
-export type VoiceRequest = { type: "voice-start" } | { type: "voice-stop" } | { type: "voice-status" };
+export type VoiceRequest = { type: "voice-start" } | { type: "voice-stop" } | { type: "voice-status" } | { type: "voice-debug-report" };
 
 export type VoiceStatus = {
   state: ConversationState;
@@ -39,6 +46,17 @@ export type VoiceStatus = {
   /** Most recent reply, so the user can read what was spoken. */
   reply: string;
   error: string | null;
+  /** Browser work from the most recent turn, for transparent debugging. */
+  activity: AgentActivity[];
+};
+
+/** A user-controlled, clipboard-ready diagnostic snapshot. It can contain page text. */
+export type VoiceDebugReport = {
+  generatedAt: string;
+  extensionVersion: string;
+  status: VoiceStatus;
+  conversationHistory: unknown[];
+  activePage: unknown;
 };
 
 export type VoiceStatusMessage = { type: "voice-status-changed"; status: VoiceStatus };
@@ -53,5 +71,5 @@ export function isOffscreenEvent(message: unknown): message is OffscreenEvent {
 
 export function isVoiceRequest(message: unknown): message is VoiceRequest {
   const type = (message as { type?: unknown } | null)?.type;
-  return type === "voice-start" || type === "voice-stop" || type === "voice-status";
+  return type === "voice-start" || type === "voice-stop" || type === "voice-status" || type === "voice-debug-report";
 }

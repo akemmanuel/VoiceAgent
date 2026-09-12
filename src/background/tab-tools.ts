@@ -12,6 +12,30 @@ import type { ToolDefinition } from "@/live/openrouter/client";
 import { formatParsedTable, parseDelimitedText } from "./data-tools";
 import { formatParsedPdf, readPdfFromUrl } from "./pdf-tools";
 
+// Tool calls are executed in a service worker, so keep the last inspected control
+// set here. This prevents the model from guessing selectors that were never shown
+// to it (the exact failure mode that made the Nextcloud update button unreachable).
+let observedSelectors = new Set<string>();
+let lastObservedPage: PageSnapshot | null = null;
+
+function rememberObservedPage(snapshot: PageSnapshot | undefined): void {
+  if (!snapshot) return;
+  lastObservedPage = snapshot;
+  observedSelectors = new Set(snapshot.interactiveElements.map(element => element.selector));
+}
+
+function unobservedSelectors(program: unknown): string[] {
+  if (!program || typeof program !== "object" || !Array.isArray((program as AutomationProgram).steps)) return [];
+  return [...new Set((program as AutomationProgram).steps
+    .map(step => step && typeof step === "object" && !Array.isArray(step) ? (step as Record<string, unknown>).selector : undefined)
+    .filter((selector): selector is string => typeof selector === "string" && !observedSelectors.has(selector)))];
+}
+
+/** The latest page state delivered to the model, for the user-requested debug report. */
+export function getLastObservedPage(): PageSnapshot | null {
+  return lastObservedPage;
+}
+
 export const BROWSER_TOOLS: ToolDefinition[] = [
   {
     name: "read-pdf",
@@ -47,7 +71,7 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
   },
   {
     name: "capture-active-tab",
-    description: "Take a screenshot of the visible part of the active tab. Use only when seeing the page matters.",
+    description: "Take a screenshot of the visible part of the active tab. The image is not available to this language-model tool loop, so use inspect-active-tab for controls and text; capture only when the user explicitly asks for a screenshot.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -65,14 +89,14 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
   },
   {
     name: "run-automation",
-    description: "Run a bounded, no-network browser program for repetitive work, then inspect the resulting page. Program steps are click, type, select, check, scroll, wait, read, or for-each. Never use this for final send, payment, publish, confirm, or delete actions; those are skipped and reported.",
+    description: "Run a bounded, no-network browser program for repetitive work, then inspect the resulting page. Every step must use the `op` property, for example {\"op\":\"click\",\"selector\":\"#button-from-inspect\"}; never use {\"click\":\"selector\"}. Operations: click, type, select, check, scroll, wait, read, or for-each. Copy each selector exactly from the most recent inspect-active-tab result. Never use this for final send, payment, publish, confirm, or delete actions; those are skipped and reported.",
     parameters: {
       type: "object",
       properties: {
         program: {
           type: "object",
           properties: {
-            steps: { type: "array", description: "At most 25 declarative steps. for-each supports operation click or read and max 50 matches." },
+            steps: { type: "array", description: "At most 25 objects. Each object requires op: click|type|select|check|scroll|wait|read|for-each. selector is required except scroll. type uses text; select uses value; check uses checked; wait uses selector or text; for-each uses selector, operation (click|read), and optional limit." },
           },
           required: ["steps"],
           additionalProperties: false,
@@ -85,7 +109,7 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
   {
     name: "act-on-active-tab",
     description:
-      "Act on the active tab: click an element, type into a field, scroll, or highlight an element so the user can see it. Use request-user-action instead of click when the final step is something the user should confirm themselves, such as paying, sending, publishing, or deleting.",
+      "Act on the active tab: click an element, type into a field, scroll, or highlight an element so the user can see it. For selector actions, copy the exact selector from the most recent inspect-active-tab result; never invent a CSS selector. Use request-user-action instead of click when the final step is something the user should confirm themselves, such as paying, sending, publishing, or deleting.",
     parameters: {
       type: "object",
       properties: {
@@ -112,11 +136,22 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
 
 /** Turns a snapshot into compact text, since the transcript is what the model reads. */
 export function formatSnapshot(snapshot: PageSnapshot): string {
-  const controls = snapshot.interactiveElements
-    .slice(0, 40)
+  // DOM order often starts with a long navigation sidebar. Rank visible controls
+  // first so page actions (for example Nextcloud's update button) are not cut off
+  // before the model sees their exact selector.
+  const controls = [...snapshot.interactiveElements]
+    .sort((left, right) => {
+      const rank = (element: InteractiveElement) => element.visible && !element.occluded && !element.disabled ? 0
+        : element.visible && !element.occluded ? 1 : element.visible ? 2 : 3;
+      return rank(left) - rank(right);
+    })
+    .slice(0, 60)
     .map((element: InteractiveElement) => `${element.selector} — ${element.role ?? element.tag}${element.label ? ` "${element.label}"` : ""}${element.disabled ? " [disabled]" : ""}${element.checked === true ? " [checked]" : ""}${element.expanded !== null ? ` [expanded=${element.expanded}]` : ""}${!element.visible ? " [offscreen]" : element.occluded ? " [covered]" : ""}`)
     .join("\n");
-  return [`Page: ${snapshot.title}`, `URL: ${snapshot.url}`, `Viewport: ${snapshot.viewport.width}×${snapshot.viewport.height} at ${snapshot.viewport.scrollX},${snapshot.viewport.scrollY}`, "", snapshot.text, controls ? `\nControls:\n${controls}` : ""].join("\n").trim();
+  // Put exact controls before potentially long body text. Providers may truncate
+  // large tool results from the end, and an action selector is more useful than
+  // a late paragraph when the agent has to operate the page.
+  return [`Page: ${snapshot.title}`, `URL: ${snapshot.url}`, `Viewport: ${snapshot.viewport.width}×${snapshot.viewport.height} at ${snapshot.viewport.scrollX},${snapshot.viewport.scrollY}`, controls ? `\nControls:\n${controls}` : "", "", snapshot.text].join("\n").trim();
 }
 
 export async function handleTabToolRequest(request: { type: string; action?: TabAction; program?: AutomationProgram; tabId?: number }, signal?: AbortSignal): Promise<TabToolResponse> {
@@ -232,14 +267,18 @@ export async function executeBrowserTool(name: string, args: string, tabId?: num
       ? await handleTabToolRequest({ ...parsed, type: name, tabId }, signal)
       : await handleTabToolRequest({ type: name, tabId }, signal);
     if (!response.ok) return response.error;
-    if (name === "capture-active-tab") return response.screenshot ? "Captured a screenshot of the visible tab." : "The screenshot was empty.";
+    if (name === "capture-active-tab") return response.screenshot ? "Captured a screenshot. It is not available to this language-model tool loop; use inspect-active-tab for actionable page state." : "The screenshot was empty.";
     if (name === "wait-for-active-tab") return response.message ?? "Finished waiting.";
+    rememberObservedPage(response.snapshot);
     return response.snapshot ? formatSnapshot(response.snapshot) : "The page had no readable content.";
   }
 
   if (name === "run-automation") {
+    const unknownSelectors = unobservedSelectors(parsed.program);
+    if (unknownSelectors.length > 0) return `Selector was not present in the last inspected Controls list: ${unknownSelectors.join(", ")}. Call inspect-active-tab and copy an exact selector.`;
     const response = await handleTabToolRequest({ type: name, program: parsed.program as AutomationProgram, tabId }, signal);
     if (!response.ok) return response.error;
+    rememberObservedPage(response.snapshot);
     const summary = response.automation ? `Completed ${response.automation.completed} operations; skipped ${response.automation.skippedFinalActions} final actions.` : "No automation result.";
     return `${summary}\nOutputs: ${JSON.stringify(response.automation?.outputs ?? {})}\n\nPage after automation:\n${response.snapshot ? formatSnapshot(response.snapshot) : "No page snapshot."}`;
   }
@@ -248,6 +287,9 @@ export async function executeBrowserTool(name: string, args: string, tabId?: num
     const kind = parsed.kind;
     if (typeof kind !== "string") {
       return "An action needs a kind of click, type, scroll, highlight, or request-user-action.";
+    }
+    if (typeof parsed.selector === "string" && observedSelectors.size > 0 && !observedSelectors.has(parsed.selector)) {
+      return `Selector was not present in the last inspected Controls list: ${parsed.selector}. Call inspect-active-tab and copy an exact selector.`;
     }
     const action = { ...parsed, kind } as unknown as TabAction;
     const response = await handleTabToolRequest({ type: "act-on-active-tab", action, tabId }, signal);

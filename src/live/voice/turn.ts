@@ -10,7 +10,7 @@
 import type { ChatMessage, ChatResult, ToolDefinition } from "../openrouter/client";
 
 /** How many model round-trips one user utterance may cost. */
-export const DEFAULT_MAX_TOOL_STEPS = 6;
+export const DEFAULT_MAX_TOOL_STEPS = 12;
 
 /**
  * The conversation prompt for the chained engine. GPT-Live does its own delegation
@@ -23,7 +23,7 @@ export function systemMessage(tools: ToolDefinition[]): ChatMessage {
     content: [
       "You are a voice assistant inside a browser extension. Your reply is read aloud, so keep it to one or two short sentences, use plain words, and never use markdown, lists, or code.",
       tools.length
-        ? `You can act on the user's browser with these tools: ${names}. Call a tool when the request needs the page, and wait for its result before answering. Do not claim you did something the tools did not confirm.`
+        ? `You can act on the user's browser with these tools: ${names}. For a request about the open page, inspect the page before answering and perform ordinary requested navigation, configuration, installation, enabling, or updating yourself. The Controls list from inspect-active-tab is authoritative: copy a selector from it exactly and never invent CSS selectors. If the requested visible control is listed, click it before trying alternatives. After a click, wait or inspect again and report only what the page confirms. Do not claim you did something the tools did not confirm.`
         : "You cannot act on the browser in this session. If a request needs the page, say so briefly.",
     ].join(" "),
   };

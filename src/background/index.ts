@@ -1,10 +1,17 @@
 import "./diagnostics";
 import type { TabToolRequest } from "@/lib/tab-tools";
 import { isOffscreenEvent, isVoiceRequest } from "@/live/voice/protocol";
-import { handleChatGPTMessage, handleOffscreenEvent, handleVoiceRequest } from "./live";
+import { handleChatGPTMessage, handleOffscreenEvent, handleVoiceDebugReport, handleVoiceRequest } from "./live";
 import { handleTabToolRequest } from "./tab-tools";
 
 const TAB_TOOL_TYPES = ["inspect-active-tab", "capture-active-tab", "wait-for-active-tab", "run-automation", "act-on-active-tab"];
+
+// The toolbar button opens the persistent native side panel instead of a popup.
+// It remains visible while the user moves between pages and tabs.
+void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {
+  // Browsers without side-panel support can still open the extension from their
+  // own extension menu; do not let this optional setup break the worker.
+});
 
 // MV3 workers can be suspended when idle, so this listener is registered at
 // module scope and keeps no state of its own.
@@ -16,7 +23,11 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     return true;
   }
   if (isVoiceRequest(message)) {
-    void handleVoiceRequest(message).then(sendResponse).catch(cause => sendResponse({ state: "failed", engine: "chatgpt", transcript: "", reply: "", error: cause instanceof Error ? cause.message : "Voice request failed." }));
+    if (message.type === "voice-debug-report") {
+      sendResponse(handleVoiceDebugReport());
+      return;
+    }
+    void handleVoiceRequest(message).then(sendResponse).catch(cause => sendResponse({ state: "failed", engine: "chatgpt", transcript: "", reply: "", error: cause instanceof Error ? cause.message : "Voice request failed.", activity: [] }));
     return true;
   }
 

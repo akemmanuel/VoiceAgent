@@ -1,10 +1,10 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { CaretDownIcon, CaretUpIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, WaveformIcon } from "@phosphor-icons/react";
+import { CaretDownIcon, CaretUpIcon, CopyIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, WaveformIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_DISPLAY_NAME, DISPLAY_NAME_STORAGE_KEY, readDisplayName } from "@/live/settings";
 import { isActive, type ConversationState } from "@/live/voice/conversation";
-import type { VoiceStatus, VoiceStatusMessage } from "@/live/voice/protocol";
+import type { VoiceDebugReport, VoiceStatus, VoiceStatusMessage } from "@/live/voice/protocol";
 
 const VOICE_LABELS: Record<ConversationState, string> = {
   idle: "Not listening",
@@ -32,6 +32,7 @@ function Popup() {
   const [busy, setBusy] = useState(false);
   const [displayName, setDisplayName] = useState(DEFAULT_DISPLAY_NAME);
   const [transcriptOpen, setTranscriptOpen] = useState(true);
+  const [debugCopied, setDebugCopied] = useState(false);
 
   useEffect(() => {
     void sendVoice({ type: "voice-status" }).then(setVoice);
@@ -93,6 +94,18 @@ function Popup() {
 
   const voiceActive = Boolean(voice && isActive(voice.state));
   const microphoneSetup = new URLSearchParams(location.search).has("microphone");
+
+  async function copyDebugReport() {
+    setError(null);
+    try {
+      const report = await chrome.runtime.sendMessage({ type: "voice-debug-report" }) as VoiceDebugReport;
+      await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+      setDebugCopied(true);
+      window.setTimeout(() => setDebugCopied(false), 2500);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The debug report could not be copied.");
+    }
+  }
 
   return (
     <main className="popup-shell p-4" data-voice-state={voice?.state ?? "idle"}>
@@ -164,7 +177,13 @@ function Popup() {
             )}
           </div>
         )}
-
+        {voice && <>
+          <p className="mt-2 text-xs text-muted-foreground">Agent activity: {voice.activity.length} tool call{voice.activity.length === 1 ? "" : "s"}</p>
+          <Button variant="secondary" className="mt-2 w-full" onClick={copyDebugReport}>
+            <CopyIcon aria-hidden="true" />
+            {debugCopied ? "Debug report copied" : "Copy debug report"}
+          </Button>
+        </>}
         {voice?.error && <p role="alert" className="notice-enter mt-3 text-sm leading-5 text-destructive">{voice.error}</p>}
         {error && <p role="alert" className="notice-enter mt-3 text-sm leading-5 text-destructive">{error}</p>}
       </section>
