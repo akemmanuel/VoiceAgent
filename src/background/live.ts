@@ -6,8 +6,9 @@
  * reports speech boundaries and plays audio, and owns no conversation logic.
  *
  * MV3 may suspend this worker when idle. An active session keeps it alive through
- * message traffic, and the session state is intentionally in memory: a suspended
- * worker means the microphone is gone anyway, so the session is over.
+ * message traffic. Active microphone state is intentionally in memory: a
+ * suspended worker means the microphone is gone anyway. The completed OpenRouter
+ * conversation itself is saved separately in extension-local storage.
  */
 
 import { getAccessToken } from "@/live/auth/credentials";
@@ -19,11 +20,13 @@ import { effectiveVoice, readOpenRouterSettings, reasoningOption } from "@/live/
 import { readChatGPTVoice, readEngine, type VoiceEngine } from "@/live/settings";
 import { bytesToBase64 } from "@/live/voice/audio-codec";
 import { isActive, reduce, type ConversationState, type VoiceAction, type VoiceEvent } from "@/live/voice/conversation";
+import { readStoredConversation, storeConversation } from "@/live/voice/history";
 import type { OffscreenCommand, OffscreenEvent, VoiceRequest, VoiceStatus } from "@/live/voice/protocol";
 import { runTurn, systemMessage } from "@/live/voice/turn";
 import { BROWSER_TOOLS, executeBrowserTool } from "./tab-tools";
 
 const OFFSCREEN_PATH = "offscreen/index.html";
+const CONVERSATION_STORAGE_KEY = "voiceAgent.conversation.v1";
 
 let state: ConversationState = "idle";
 let engine: VoiceEngine = "chatgpt";
@@ -31,6 +34,7 @@ let error: string | null = null;
 let transcript = "";
 let reply = "";
 let history: ChatMessage[] = [];
+let conversationLoaded = false;
 let turnAbort: AbortController | null = null;
 let sessionId: string | null = null;
 let sessionAbort: AbortController | null = null;
@@ -43,6 +47,47 @@ function messageOf(cause: unknown, fallback: string): string {
 
 function status(): VoiceStatus {
   return { state, engine, transcript, reply, error };
+}
+
+async function loadConversation(): Promise<void> {
+  if (conversationLoaded) return;
+  conversationLoaded = true;
+  try {
+    const stored = readStoredConversation((await chrome.storage.local.get(CONVERSATION_STORAGE_KEY))[CONVERSATION_STORAGE_KEY]);
+    if (!stored) return;
+    history = stored.history;
+    transcript = stored.transcript;
+    reply = stored.reply;
+  } catch {
+    // Storage is an enhancement. A new in-memory conversation is still usable.
+  }
+}
+
+async function saveConversation(): Promise<void> {
+  const stored = storeConversation(history, transcript, reply);
+  history = stored.history;
+  try {
+    await chrome.storage.local.set({ [CONVERSATION_STORAGE_KEY]: stored });
+  } catch {
+    // Do not make an otherwise successful agent turn fail because storage is full.
+  }
+}
+
+async function resetConversation(): Promise<VoiceStatus> {
+  if (isActive(state)) await dispatch({ type: "stop" });
+  history = [];
+  transcript = "";
+  reply = "";
+  error = null;
+  state = "idle";
+  conversationLoaded = true;
+  try {
+    await chrome.storage.local.remove(CONVERSATION_STORAGE_KEY);
+  } catch {
+    // The visible session is still reset even if the browser declines storage access.
+  }
+  await broadcast();
+  return status();
 }
 
 async function broadcast(): Promise<void> {
@@ -91,6 +136,7 @@ async function loadSpeechModels(): Promise<CatalogModel[]> {
  */
 /** Run the browser-agent loop used by both typed turns and OpenRouter voice turns. */
 async function runAgentTurn(userText: string): Promise<string> {
+  await loadConversation();
   const settings = await readOpenRouterSettings();
   if (!settings.apiKey) throw new Error("Add an OpenRouter key in settings before using the browser agent.");
 
@@ -111,7 +157,8 @@ async function runAgentTurn(userText: string): Promise<string> {
         executeTool: executeBrowserTool,
       },
       // The system prompt is seeded once and stays at the head of the history.
-      history.length > 0 ? history : [systemMessage(BROWSER_TOOLS)],
+      // Old or manually repaired storage without it is still safe to resume.
+      history.some(message => message.role === "system") ? history : [systemMessage(BROWSER_TOOLS), ...history],
       userText,
       BROWSER_TOOLS,
     );
@@ -124,6 +171,7 @@ async function runAgentTurn(userText: string): Promise<string> {
 
 async function runVoiceTurn(userText: string): Promise<void> {
   await dispatch({ type: "turn-complete", reply: await runAgentTurn(userText) });
+  await saveConversation();
 }
 
 /**
@@ -151,6 +199,7 @@ async function runTextTurn(text: string): Promise<VoiceStatus> {
     }
     reply = (await runAgentTurn(userText)).trim();
     state = "idle";
+    await saveConversation();
   } catch (cause) {
     state = "failed";
     error = messageOf(cause, "That message could not be processed.");
@@ -249,6 +298,7 @@ export async function handleVoiceSettingsChanged(): Promise<void> {
 export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceStatus> {
   switch (request.type) {
     case "voice-status":
+      await loadConversation();
       return status();
 
     case "voice-start": {
@@ -259,9 +309,7 @@ export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceSt
       sessionId = id;
       sessionAbort = new AbortController();
       engine = await readEngine();
-      history = [];
-      transcript = "";
-      reply = "";
+      await loadConversation();
       await broadcast();
       try {
         if (engine === "chatgpt") await getAccessToken();
@@ -288,6 +336,9 @@ export async function handleVoiceRequest(request: VoiceRequest): Promise<VoiceSt
 
     case "text-send":
       return runTextTurn(request.text);
+
+    case "conversation-reset":
+      return resetConversation();
   }
 }
 

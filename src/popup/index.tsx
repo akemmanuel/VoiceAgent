@@ -1,11 +1,11 @@
 import { StrictMode, useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUpRightIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, PaperPlaneTiltIcon, WaveformIcon } from "@phosphor-icons/react";
+import { ArrowCounterClockwiseIcon, ArrowUpRightIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, PaperPlaneTiltIcon, WaveformIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { PageSnapshot, TabAction, TabToolRequest, TabToolResponse } from "@/lib/tab-tools";
 import { isActive, type ConversationState } from "@/live/voice/conversation";
-import type { VoiceStatus, VoiceStatusMessage } from "@/live/voice/protocol";
+import type { VoiceRequest, VoiceStatus, VoiceStatusMessage } from "@/live/voice/protocol";
 
 const VOICE_LABELS: Record<ConversationState, string> = {
   idle: "Not listening",
@@ -18,7 +18,7 @@ const VOICE_LABELS: Record<ConversationState, string> = {
   failed: "Stopped",
 };
 
-async function sendVoice(message: { type: "voice-start" | "voice-stop" | "voice-status" } | { type: "text-send"; text: string }): Promise<VoiceStatus | null> {
+async function sendVoice(message: VoiceRequest): Promise<VoiceStatus | null> {
   try {
     return (await chrome.runtime.sendMessage(message)) as VoiceStatus;
   } catch {
@@ -48,6 +48,7 @@ function Popup() {
   const [busy, setBusy] = useState(false);
   const [writtenMessage, setWrittenMessage] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [resettingConversation, setResettingConversation] = useState(false);
 
   useEffect(() => {
     void sendVoice({ type: "voice-status" }).then(setVoice);
@@ -106,6 +107,18 @@ function Popup() {
       }
     } finally {
       setSendingMessage(false);
+    }
+  }
+
+  async function startNewConversation() {
+    setResettingConversation(true);
+    setError(null);
+    try {
+      const next = await sendVoice({ type: "conversation-reset" });
+      if (next) setVoice(next);
+      else setError("The conversation could not be reset. Try reopening the side panel.");
+    } finally {
+      setResettingConversation(false);
     }
   }
 
@@ -203,6 +216,10 @@ function Popup() {
           </form>
         </div>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">Speak or write — both continue the same browser-agent conversation.</p>
+        <Button variant="secondary" className="mt-3 w-full" onClick={startNewConversation} disabled={busy || sendingMessage || resettingConversation}>
+          <ArrowCounterClockwiseIcon aria-hidden="true" />
+          {resettingConversation ? "Starting new conversation…" : "New conversation"}
+        </Button>
         {voice && (
           <p role="status" className="mt-2 text-xs text-muted-foreground">
             {VOICE_LABELS[voice.state]} · {voice.engine === "openrouter" ? "OpenRouter" : "ChatGPT"} engine

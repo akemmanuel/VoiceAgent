@@ -33,7 +33,9 @@ export type VoiceRequest =
   | { type: "voice-stop" }
   | { type: "voice-status" }
   /** A written turn uses the same browser-agent history as OpenRouter voice turns. */
-  | { type: "text-send"; text: string };
+  | { type: "text-send"; text: string }
+  /** End the current conversation and remove its durable local history. */
+  | { type: "conversation-reset" };
 
 export type VoiceSettingsChangedMessage = { type: "voice-settings-changed" };
 
@@ -62,5 +64,5 @@ export function isVoiceRequest(message: unknown): message is VoiceRequest {
   const candidate = message as { type?: unknown; text?: unknown } | null;
   const type = candidate?.type;
   if (type === "text-send") return typeof candidate?.text === "string";
-  return type === "voice-start" || type === "voice-stop" || type === "voice-status" || type === "text-send";
+  return type === "voice-start" || type === "voice-stop" || type === "voice-status" || type === "conversation-reset";
 }

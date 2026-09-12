@@ -23,6 +23,7 @@ describe("voice request protocol", () => {
   test("accepts a written turn only when it contains text", () => {
     expect(isVoiceRequest({ type: "text-send", text: "Summarize this page" })).toBe(true);
     expect(isVoiceRequest({ type: "text-send" })).toBe(false);
+    expect(isVoiceRequest({ type: "conversation-reset" })).toBe(true);
   });
 });
 
