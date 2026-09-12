@@ -33,10 +33,11 @@ bun run check
 ```text
 src/
   popup/          Popup HTML and React entry point
-  options/        Settings HTML and React entry point
+  options/        Settings HTML and React entry point, plus the ChatGPT account panel
   background/     MV3 service worker
+  live/auth/      ChatGPT sign-in, token storage, and token refresh
   components/ui/  shadcn/ui button and separator
-  lib/            Shared class-name utility
+  lib/            Shared utilities, including the tab-tool message types
   styles/         Tailwind stylesheet and theme tokens
 public/
   manifest.json
@@ -56,6 +57,14 @@ Opening the popup grants VoiceAgent temporary access to the active tab. The **Re
 
 ChatGPT should use these tools through the message types in `src/lib/tab-tools.ts` (`inspect-active-tab`, `capture-active-tab`, and `act-on-active-tab`), rather than receiving direct browser API access.
 
+## ChatGPT sign-in
+
+The settings page signs in to ChatGPT with a device code, so VoiceAgent needs no API key. Open settings, choose **Sign in with ChatGPT**, and a sign-in page opens with a one-time code shown in the panel. Approving it stores the tokens in `chrome.storage.local` and the panel switches to the signed-in account.
+
+This uses OpenAI's device authorization flow, which exists for clients that cannot receive a browser redirect. The alternative for third-party clients would be a localhost callback, which an extension cannot host. The only host access the manifest requests is `auth.openai.com`, alongside the `storage` permission.
+
+Sign-in and refresh live in `src/live/auth/`. The access token is refreshed shortly before it expires. Because the extension drives Codex's public OAuth client from outside Codex, voice sessions bill to the signed-in account and count against its concurrent-session limit.
+
 ## Responsibilities
 
 - **akemmanuel** — Builds the tool that lets the agent run arbitrary sandboxed JavaScript.
@@ -64,13 +73,15 @@ ChatGPT should use these tools through the message types in `src/lib/tab-tools.t
 
 ## Scope
 
-The popup opens settings and displays an error if that action fails. The settings page is an empty state, not a working voice configuration form. The worker is an entry point for future event listeners.
+The popup exposes tab tools and opens settings. The settings page signs in to ChatGPT and stores the resulting tokens; voice preferences and the voice session itself are not implemented yet. The worker holds the tab tools and is an entry point for future live-session work.
 
-No voice recording, content scripts, storage, network calls, or browser permissions are included. Register future worker listeners at module scope; MV3 workers can stop when idle, so globals are not durable storage.
+There is no voice recording or live audio yet, and no content scripts. The extension requests `activeTab` and `scripting` for the popup's tab tools, and `storage` plus host access to `auth.openai.com` for sign-in. Register future worker listeners at module scope; MV3 workers can stop when idle, so globals are not durable storage.
 
 ## Verification
 
 The initial build loaded in Chromium. Both pages passed axe with zero violations, and the settings API resolved successfully. The popup was visually checked. Settings-page screenshots were blank or timed out, so its visual review remains incomplete. Edge has not been tested.
+
+The device sign-in flow was verified against the live auth server with `bun run scripts/device-flow-smoke.ts`, which completed a real sign-in and read the account id, user id, email, and plan type from the returned id token. The auth endpoints send `access-control-allow-origin: *`, so extension fetch needs no `declarativeNetRequest` rule. The account panel itself has not been exercised in a loaded extension yet, and no voice session has been opened.
 
 ## License
 
