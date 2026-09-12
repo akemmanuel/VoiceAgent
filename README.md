@@ -2,6 +2,8 @@
 
 Manifest V3 browser extension starter for Chrome and Edge. Uses React, TypeScript, Tailwind CSS, shadcn/ui, and Phosphor icons. Bun bundles all code locally.
 
+![The VoiceAgent popup: Ready to listen, with a Start voice session button](docs/screenshots/voice-panel.png)
+
 ## Build and load
 
 ```bash
