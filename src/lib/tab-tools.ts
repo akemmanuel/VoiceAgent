@@ -34,12 +34,13 @@ export type PageSnapshot = {
   interactiveElements: InteractiveElement[];
 };
 
-export type TabToolRequest =
+export type TabToolRequest = { tabId?: number } & (
   | { type: "inspect-active-tab" }
   | { type: "capture-active-tab" }
   | { type: "wait-for-active-tab"; selector?: string; text?: string; timeoutMs?: number }
   | { type: "run-automation"; program: AutomationProgram }
-  | { type: "act-on-active-tab"; action: TabAction };
+  | { type: "act-on-active-tab"; action: TabAction }
+);
 
 export type TabToolResponse =
   | { ok: true; snapshot?: PageSnapshot; screenshot?: string; found?: boolean; automation?: AutomationResult; message?: string }

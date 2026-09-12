@@ -1,8 +1,8 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, WaveformIcon } from "@phosphor-icons/react";
+import { CaretDownIcon, CaretUpIcon, GearSixIcon, MicrophoneIcon, MicrophoneSlashIcon, WaveformIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { DEFAULT_DISPLAY_NAME, DISPLAY_NAME_STORAGE_KEY, readDisplayName } from "@/live/settings";
 import { isActive, type ConversationState } from "@/live/voice/conversation";
 import type { VoiceStatus, VoiceStatusMessage } from "@/live/voice/protocol";
 
@@ -30,15 +30,25 @@ function Popup() {
   const [error, setError] = useState<string | null>(null);
   const [voice, setVoice] = useState<VoiceStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [displayName, setDisplayName] = useState(DEFAULT_DISPLAY_NAME);
+  const [transcriptOpen, setTranscriptOpen] = useState(true);
 
   useEffect(() => {
     void sendVoice({ type: "voice-status" }).then(setVoice);
-    const listener = (message: unknown) => {
+    void readDisplayName().then(setDisplayName);
+    const messageListener = (message: unknown) => {
       const update = message as VoiceStatusMessage;
       if (update?.type === "voice-status-changed") setVoice(update.status);
     };
-    chrome.runtime.onMessage.addListener(listener);
-    return () => chrome.runtime.onMessage.removeListener(listener);
+    const storageListener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName === "local" && changes[DISPLAY_NAME_STORAGE_KEY]) void readDisplayName().then(setDisplayName);
+    };
+    chrome.runtime.onMessage.addListener(messageListener);
+    chrome.storage.onChanged.addListener(storageListener);
+    return () => {
+      chrome.runtime.onMessage.removeListener(messageListener);
+      chrome.storage.onChanged.removeListener(storageListener);
+    };
   }, []);
 
   async function toggleVoice() {
@@ -53,18 +63,16 @@ function Popup() {
             await chrome.tabs.create({ url: chrome.runtime.getURL("popup/index.html?microphone=1") });
             return;
           }
-          // Offscreen documents cannot show permission prompts. Request once in
-          // this visible extension tab, then let the audio document own capture.
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           stream.getTracks().forEach(track => track.stop());
         }
       }
       const next = await sendVoice({ type: stopping ? "voice-stop" : "voice-start" });
       if (next) setVoice(next);
-      else setError("The voice session could not be reached. Try reopening the popup.");
+      else setError("The voice session could not be reached. Try reopening VoiceAgent.");
     } catch (cause) {
       setError(cause instanceof DOMException && cause.name === "NotAllowedError"
-        ? "Microphone access is blocked. Allow the microphone in this tab's site settings, then retry."
+        ? "Microphone access is blocked. Allow it in this tab's site settings, then retry."
         : cause instanceof Error ? cause.message : "The voice session could not start.");
     } finally {
       setBusy(false);
@@ -77,40 +85,91 @@ function Popup() {
     try {
       await chrome.runtime.openOptionsPage();
     } catch {
-      setError("Settings couldn't open. Try again, or open extension options from your browser's Extensions page.");
+      setError("Settings couldn't open. Open extension options from your browser's Extensions page.");
     } finally {
       setOpening(false);
     }
   }
 
+  const voiceActive = Boolean(voice && isActive(voice.state));
+  const microphoneSetup = new URLSearchParams(location.search).has("microphone");
+
   return (
-    <main className="p-6">
-      <header className="flex items-center gap-2.5">
-        <WaveformIcon size={26} weight="bold" className="text-primary" aria-hidden="true" />
-        <h1 className="text-lg font-semibold tracking-tight">VoiceAgent</h1>
-        <Button variant="ghost" size="icon" className="ml-auto" onClick={openSettings} disabled={opening} aria-label={opening ? "Opening settings" : "Open settings"} title="Open settings">
-          <GearSixIcon aria-hidden="true" />
+    <main className="popup-shell p-4" data-voice-state={voice?.state ?? "idle"}>
+      <header className="app-header flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className="brand-mark flex size-9 items-center justify-center rounded-xl text-primary-foreground">
+            <WaveformIcon size={21} weight="bold" aria-hidden="true" />
+          </span>
+          <div>
+            <h1 className="text-base font-semibold tracking-tight">VoiceAgent</h1>
+            <p className="text-xs text-muted-foreground">Your browser, voice controlled</p>
+          </div>
+        </div>
+        <Button variant="ghost" size="icon" onClick={openSettings} disabled={opening} aria-label="Open settings" title="Open settings">
+          <GearSixIcon className={opening ? "animate-spin" : ""} aria-hidden="true" />
         </Button>
       </header>
-      {new URLSearchParams(location.search).has("microphone") && <p role="status" className="mt-4 text-sm leading-6">Click Start voice session below, then allow microphone access. Audio is sent to the selected voice provider while the session runs. You can close this tab after connecting.</p>}
-      <Separator className="my-6" />
-      <section aria-label="Voice session">
-        <Button className="w-full" onClick={toggleVoice} disabled={busy}>
-          {voice && isActive(voice.state) ? <MicrophoneSlashIcon aria-hidden="true" /> : <MicrophoneIcon aria-hidden="true" />}
-          {busy ? "Working…" : voice && isActive(voice.state) ? "Stop voice session" : "Start voice session"}
+
+      {microphoneSetup && (
+        <div role="status" className="notice-enter mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs leading-5 text-muted-foreground">
+          Start the session and allow microphone access. You can close this tab after connecting.
+        </div>
+      )}
+
+      <section aria-labelledby="voice-title" className="voice-card mt-4 rounded-2xl p-5" aria-live="polite">
+        <div className="flex items-center gap-3">
+          <span className={`voice-orb ${voiceActive ? "voice-orb-active" : ""}`} aria-hidden="true">
+            <span className="voice-bars"><span /><span /><span /><span /><span /></span>
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 id="voice-title" className="text-lg font-semibold tracking-tight">{voice ? VOICE_LABELS[voice.state] : "Ready to listen"}</h2>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {voice ? `${voice.engine === "openrouter" ? "OpenRouter" : "ChatGPT"} voice engine` : "Start a hands-free browser session"}
+            </p>
+          </div>
+          <span className={`status-chip ${voiceActive ? "status-chip-active" : ""}`}>
+            <span aria-hidden="true" />{voiceActive ? "Live" : "Ready"}
+          </span>
+        </div>
+
+        <Button className={`mt-5 h-11 w-full rounded-xl ${voiceActive ? "bg-destructive hover:bg-destructive/90" : ""}`} onClick={toggleVoice} disabled={busy}>
+          {voiceActive ? <MicrophoneSlashIcon aria-hidden="true" /> : <MicrophoneIcon weight="fill" aria-hidden="true" />}
+          {busy ? "Working…" : voiceActive ? "Stop voice session" : "Start voice session"}
         </Button>
-        {voice && (
-          <p role="status" className="mt-3 text-center text-base font-medium">
-            {VOICE_LABELS[voice.state]}
-          </p>
+
+        {(voice?.transcript || voice?.reply) && (
+          <div className="transcript-panel mt-4 overflow-hidden rounded-xl">
+            <div className="flex items-center justify-between px-3 py-2">
+              <p className="text-xs font-semibold">Live transcription</p>
+              <Button variant="ghost" size="icon-xs" onClick={() => setTranscriptOpen(open => !open)} aria-expanded={transcriptOpen} aria-controls="transcript-content" aria-label={transcriptOpen ? "Minimize transcription" : "Expand transcription"} title={transcriptOpen ? "Minimize transcription" : "Expand transcription"}>
+                {transcriptOpen ? <CaretUpIcon aria-hidden="true" /> : <CaretDownIcon aria-hidden="true" />}
+              </Button>
+            </div>
+            {transcriptOpen && (
+              <div id="transcript-content" className="conversation-feed max-h-48 space-y-3 overflow-y-auto border-t border-border p-3 text-xs leading-5">
+                {voice.transcript && (
+                  <div className="message-row message-user">
+                    <div className="message-meta justify-end"><span>{displayName}</span><span className="message-avatar message-avatar-user" aria-hidden="true">{displayName.charAt(0).toUpperCase()}</span></div>
+                    <p className="message-bubble message-bubble-user">{voice.transcript}</p>
+                  </div>
+                )}
+                {voice.reply && (
+                  <div className="message-row message-agent">
+                    <div className="message-meta"><span className="message-avatar message-avatar-agent" aria-hidden="true"><WaveformIcon weight="bold" /></span><span>VoiceAgent</span></div>
+                    <p className="message-bubble message-bubble-agent">{voice.reply}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
-        {(!voice || !isActive(voice.state)) && <p className="mt-4 text-sm leading-6 text-muted-foreground">Try saying "Summarize this page" or "Show me where to click."</p>}
-        {voice?.transcript && <p className="mt-3 text-xs leading-5"><span className="font-semibold">You:</span> {voice.transcript}</p>}
-        {voice?.reply && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Agent:</span> {voice.reply}</p>}
-        {voice?.error && <p role="alert" className="mt-3 text-sm leading-5 text-destructive">{voice.error}</p>}
-        {error && <p role="alert" className="mt-3 text-sm leading-5 text-destructive">{error}</p>}
+
+        {voice?.error && <p role="alert" className="notice-enter mt-3 text-sm leading-5 text-destructive">{voice.error}</p>}
+        {error && <p role="alert" className="notice-enter mt-3 text-sm leading-5 text-destructive">{error}</p>}
       </section>
-      <p className="mt-5 text-xs leading-5 text-muted-foreground">The microphone is used only while a voice session is running · Password fields are protected</p>
+
+      <p className="mt-3 px-2 text-center text-[11px] leading-4 text-muted-foreground">Microphone active only during a session · Passwords protected</p>
     </main>
   );
 }
