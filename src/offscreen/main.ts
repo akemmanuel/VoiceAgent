@@ -16,6 +16,15 @@ const FRAME_MS = 50;
 
 const RECORDER_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
 
+/**
+ * How long after playback stops the microphone stays ignored.
+ *
+ * The agent's own voice reaches the microphone through the speakers, and without
+ * this the detector hears it, fires, and the agent interrupts itself in a loop.
+ * Echo cancellation helps but cannot be relied on across devices.
+ */
+const ECHO_TAIL_MS = 350;
+
 let liveCall: ChatGPTCall | null = null;
 let stream: MediaStream | null = null;
 let context: AudioContext | null = null;
@@ -27,6 +36,7 @@ let chunks: Blob[] = [];
 /** Set when the worker abandons an utterance, so the recording is dropped unheard. */
 let discardRecording = false;
 const playing = new Set<AudioBufferSourceNode>();
+let playbackEndedAt = Number.NEGATIVE_INFINITY;
 
 function post(event: OffscreenEvent): void {
   void chrome.runtime.sendMessage(event).catch(() => {
@@ -42,7 +52,13 @@ function pickRecorderType(): string | undefined {
 async function startListening(): Promise<void> {
   if (stream) return;
   stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      // Automatic gain is off deliberately. It amplifies the quiet conditions where
+      // the noise floor should read as silence, which destroys a level detector.
+      autoGainControl: false,
+    },
   });
   context ??= new AudioContext();
   await context.resume();
@@ -60,6 +76,10 @@ async function startListening(): Promise<void> {
 
 function onFrame(): void {
   if (!analyser || !detector) return;
+  // Never listen to ourselves. Playback plus the tail below is treated as silence,
+  // so the detector's calibration and floor tracking stay honest while the agent talks.
+  if (playing.size > 0 || performance.now() - playbackEndedAt < ECHO_TAIL_MS) return;
+
   const frame = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(frame);
   const event = detector.push(rmsFromByteTimeDomain(frame));
@@ -127,6 +147,7 @@ function stopPlayback(): void {
     }
   }
   playing.clear();
+  playbackEndedAt = performance.now();
 }
 
 async function play(audioBase64: string): Promise<void> {
@@ -146,7 +167,10 @@ async function play(audioBase64: string): Promise<void> {
   player.addEventListener("ended", () => {
     playing.delete(player);
     // Only the natural end reports completion; a cancelled reply does not.
-    if (playing.size === 0) post({ source: "offscreen", type: "playback-end" });
+    if (playing.size === 0) {
+      playbackEndedAt = performance.now();
+      post({ source: "offscreen", type: "playback-end" });
+    }
   });
   player.start();
 }

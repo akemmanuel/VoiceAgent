@@ -86,8 +86,9 @@ console.log("\n2. Detector against a synthetic utterance");
 {
   const detector = new VoiceActivityDetector({ ...DEFAULT_VAD, frameMs: 50 });
   const events: string[] = [];
-  // 0.4s silence, 1.2s of tone, 1.5s silence, with real RMS maths on real samples.
-  for (const [amplitude, frames] of [[0, 8], [0.3, 24], [0, 30]] as [number, number][]) {
+  // Leading silence covers the calibration window, then a tone, then trailing silence.
+  // The envelope is fed through the real detector and the real RMS maths.
+  for (const [amplitude, frames] of [[0, 16], [0.3, 24], [0, 30]] as [number, number][]) {
     for (let frame = 0; frame < frames; frame += 1) {
       const samples = new Float32Array(800);
       for (let index = 0; index < samples.length; index += 1) {

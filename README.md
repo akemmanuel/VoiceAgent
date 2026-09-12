@@ -106,7 +106,13 @@ Microphone capture and playback live in an offscreen document, because an MV3 se
 
 Turn-taking is an explicit state machine in `src/live/voice/conversation.ts`, kept pure so it can be tested without a microphone: `listening -> capturing -> transcribing -> thinking -> speaking -> listening`. Speaking over the agent counts as a barge-in, which cuts playback, cancels the turn in flight, and starts listening again without releasing the microphone. A late reply from a cancelled turn is discarded rather than spoken.
 
-Speech detection in `src/live/voice/vad.ts` is energy-based with two thresholds, so speech has to be loud to start an utterance but only needs to stay above a lower bar to continue. A pause mid-sentence therefore does not split one sentence into two turns. It is not a learned VAD, so steady background noise needs its thresholds raised.
+Speech detection in `src/live/voice/vad.ts` is energy-based with two thresholds, so speech has to be loud to start an utterance but only needs to stay above a lower bar to continue. A pause mid-sentence therefore does not split one sentence into two turns.
+
+The thresholds are relative to a noise floor measured during a short calibration window at the start of each session, not fixed levels. Fixed levels cannot work across devices: a laptop microphone with gain applied can idle above the level a quiet headset reaches while someone is talking, which reads as permanent speech. The floor is the median of the calibration frames, which resists a cough or a door slam, and it tracks slowly upward while the room is quiet so a fan or an air conditioner does not become a voice. It only ever learns from frames that are not speech, so a long utterance cannot teach it that talking is the new baseline. `maxUtteranceMs` cuts off a monologue, so capture can never be left open forever.
+
+Two details matter for correctness rather than tuning. Levels are measured with the frame's mean removed: an analyzer frame rests near 128 rather than 0, and a constant bias of only three counts reads as 0.023 RMS, above a typical speech threshold, so without this a silent microphone with a small offset looks like continuous speech. And the detector is fed nothing while the agent is speaking, plus a short tail, because the agent's own voice reaches the microphone through the speakers and would otherwise interrupt itself in a loop.
+
+Automatic gain control is deliberately disabled on the microphone, because it amplifies exactly the quiet conditions where the floor should read as silence.
 
 The agent turn in `src/live/voice/turn.ts` runs a bounded tool loop over the tools in `src/background/tab-tools.ts`. A tool failure is reported back to the model rather than ending the turn, and the loop stops after `DEFAULT_MAX_TOOL_STEPS` rounds so a model that keeps calling tools cannot spend the user's balance indefinitely.
 
