@@ -5,6 +5,16 @@ import { handleTabToolRequest } from "./tab-tools";
 
 const TAB_TOOL_TYPES = ["inspect-active-tab", "capture-active-tab", "wait-for-active-tab", "run-automation", "act-on-active-tab"];
 
+// The browser owns the side panel, so it survives page reloads and ordinary tab
+// navigation. It deliberately uses one global panel rather than a tab-specific
+// instance, keeping the agent conversation available across websites.
+if ("sidePanel" in chrome) {
+  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {
+    // Older Chromium builds can still load the extension; they simply cannot
+    // provide the persistent panel UI.
+  });
+}
+
 // MV3 workers can be suspended when idle, so this listener is registered at
 // module scope and keeps no state of its own.
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {

@@ -8,15 +8,17 @@ const manifest = await Bun.file(join(dist, "manifest.json")).json();
 describe("built extension", () => {
   test("uses MV3 with persistent browser access and strict privileged-page CSP", () => {
     expect(manifest.manifest_version).toBe(3);
-    expect(manifest.permissions ?? []).toEqual(["tabs", "scripting", "storage", "offscreen", "downloads"]);
+    expect(manifest.permissions ?? []).toEqual(["tabs", "scripting", "storage", "offscreen", "downloads", "sidePanel"]);
     expect(manifest.host_permissions ?? []).toEqual(["<all_urls>"]);
+    expect(manifest.side_panel).toEqual({ default_path: "popup/index.html" });
+    expect(manifest.action.default_popup).toBeUndefined();
     expect(manifest.content_scripts ?? []).toEqual([]);
     expect(manifest.background.type).toBe("module");
     expect(manifest.content_security_policy.extension_pages).toBe("script-src 'self'; object-src 'self'");
   });
 
   test("has every declared entry point and PNG icon", async () => {
-    const files = [manifest.action.default_popup, manifest.options_ui.page, manifest.background.service_worker,
+    const files = [manifest.side_panel.default_path, manifest.options_ui.page, manifest.background.service_worker,
       ...Object.values(manifest.icons), ...Object.values(manifest.action.default_icon)] as string[];
     for (const path of files) {
       expect(await Bun.file(join(dist, path)).exists()).toBe(true);

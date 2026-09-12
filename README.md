@@ -16,7 +16,7 @@ To load it manually, run `bun run build`, then:
 1. Open `chrome://extensions` or `edge://extensions`.
 2. Turn on Developer mode.
 3. Click **Load unpacked** and select this project's `dist/` directory.
-4. Pin VoiceAgent and click its icon to open the popup.
+4. Pin VoiceAgent and click its icon to open its side panel. The browser lets you place the panel on the left or right.
 5. Click **Open settings** to open the options page.
 
 After editing, run `bun run build`, reload the extension on the Extensions page, and reopen the popup or refresh settings. There is no development server or hot reload.
@@ -126,7 +126,7 @@ The agent turn in `src/live/voice/turn.ts` runs a bounded tool loop over the too
 
 ## Scope
 
-The popup exposes tab tools, voice controls, and opens settings. The settings page signs in to ChatGPT, stores those tokens, and holds OpenRouter settings. The OpenRouter engine can hold a spoken conversation; the ChatGPT engine still cannot, and says so rather than failing silently when selected.
+VoiceAgent opens as a browser side panel rather than a transient toolbar popup. The panel stays open while normal webpages reload and while the user moves between tabs, so it is the persistent surface for tab tools, voice controls, written chat, and settings. The browser owns its left/right placement and the user may close it at any time. The settings page signs in to ChatGPT, stores those tokens, and holds OpenRouter settings. The OpenRouter engine can hold a spoken conversation; the ChatGPT engine still cannot, and says so rather than failing silently when selected.
 
 The extension requests `tabs`, `scripting`, and `storage`, with persistent `<all_urls>` host access for browser tools and network requests, and `offscreen` for microphone capture and playback. This includes both engine hosts. Broad host access does not bypass browser security restrictions or change the privileged pages' content security policy. There are no content scripts. Register future worker listeners at module scope; MV3 workers can stop when idle, so globals are not durable storage.
 
