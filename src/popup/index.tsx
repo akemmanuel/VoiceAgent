@@ -17,7 +17,9 @@ function Popup() {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<PageSnapshot | null>(null);
+  const [screenshot, setScreenshot] = useState<string | null>(null);
   const [loadingPage, setLoadingPage] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const [selector, setSelector] = useState("");
   const [text, setText] = useState("");
 
@@ -48,6 +50,15 @@ function Popup() {
     if (!response.ok) setError(response.error);
   }
 
+  async function captureActiveTab() {
+    setCapturing(true);
+    setError(null);
+    const response = await sendTabTool({ type: "capture-active-tab" });
+    setCapturing(false);
+    if (response.ok && response.screenshot) setScreenshot(response.screenshot);
+    else setError(response.ok ? "No screenshot was returned." : response.error);
+  }
+
   return (
     <main className="p-6">
       <header className="flex items-center gap-2.5">
@@ -63,12 +74,16 @@ function Popup() {
         <Button className="mt-5 w-full" onClick={inspectActiveTab} disabled={loadingPage}>
           {loadingPage ? "Reading page…" : "Read active tab"}
         </Button>
+        <Button variant="secondary" className="mt-2 w-full" onClick={captureActiveTab} disabled={capturing}>
+          {capturing ? "Capturing screenshot…" : "Capture visible tab"}
+        </Button>
         {snapshot && <div className="mt-4 rounded-md border border-border p-3 text-xs leading-5">
           <p className="font-semibold">{snapshot.title || "Untitled page"}</p>
           <p className="truncate text-muted-foreground">{snapshot.url}</p>
           <p className="mt-2 text-muted-foreground">{snapshot.text.slice(0, 360) || "No visible text"}</p>
           <p className="mt-2 text-muted-foreground">{snapshot.interactiveElements.length} interactive elements found</p>
         </div>}
+        {screenshot && <img className="mt-4 max-h-48 w-full rounded-md border border-border object-contain" src={screenshot} alt="Screenshot of the active browser tab" />}
         <div className="mt-4 grid gap-2">
           <input className="h-9 rounded-md border bg-background px-3 text-sm" value={selector} onChange={event => setSelector(event.target.value)} placeholder="CSS selector, e.g. button[type=submit]" aria-label="CSS selector" />
           <input className="h-9 rounded-md border bg-background px-3 text-sm" value={text} onChange={event => setText(event.target.value)} placeholder="Text to enter" aria-label="Text to enter" />

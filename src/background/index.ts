@@ -3,7 +3,7 @@ import type { InteractiveElement, PageSnapshot, TabAction, TabToolRequest, TabTo
 // MV3 workers can be suspended when idle, so this listener is registered at
 // module scope and has no durable in-memory state.
 chrome.runtime.onMessage.addListener((request: TabToolRequest, _sender, sendResponse) => {
-  if (request.type !== "inspect-active-tab" && request.type !== "act-on-active-tab") return;
+  if (request.type !== "inspect-active-tab" && request.type !== "capture-active-tab" && request.type !== "act-on-active-tab") return;
 
   void handleTabToolRequest(request).then(sendResponse);
   return true;
@@ -13,6 +13,11 @@ async function handleTabToolRequest(request: TabToolRequest): Promise<TabToolRes
   try {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!tab?.id) return { ok: false, error: "No active browser tab is available." };
+
+    if (request.type === "capture-active-tab") {
+      const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+      return { ok: true, screenshot };
+    }
 
     if (request.type === "inspect-active-tab") {
       const result = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: inspectPage });
