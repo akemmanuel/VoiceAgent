@@ -57,11 +57,6 @@ export async function readOpenRouterSettings(): Promise<OpenRouterSettings> {
 
 export async function writeOpenRouterSettings(settings: OpenRouterSettings): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEY]: settings });
-  try {
-    await chrome.runtime?.sendMessage?.({ type: "voice-settings-changed" });
-  } catch {
-    // The service worker may be asleep or not listening in tests.
-  }
 }
 
 /** The agent cannot run a turn without a key and a model for each stage. */

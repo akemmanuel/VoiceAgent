@@ -7,39 +7,24 @@
 
 /**
  * Root-mean-square level of a time-domain analyzer frame, normalized to 0..1.
- *
- * The frame mean is removed before squaring. `AnalyserNode` centers silence at 128,
- * but real devices rest a few counts away from it, and a constant bias of only three
- * counts reads as 0.023 RMS — above a typical speech threshold. Left in, a silent
- * microphone with a small offset looks like continuous speech, which is exactly what
- * a level detector must never conclude.
+ * `AnalyserNode.getByteTimeDomainData` reports silence as 128, not 0, so the
+ * values are recentered before squaring.
  */
 export function rmsFromByteTimeDomain(data: Uint8Array): number {
   if (data.length === 0) return 0;
-  let mean = 0;
-  for (const sample of data) mean += sample;
-  mean /= data.length;
-
   let sum = 0;
   for (const sample of data) {
-    const centered = (sample - mean) / 128;
+    const centered = (sample - 128) / 128;
     sum += centered * centered;
   }
   return Math.sqrt(sum / data.length);
 }
 
-/** Root-mean-square level of float samples in -1..1, with any DC offset removed. */
+/** Root-mean-square level of float samples in -1..1. */
 export function rmsFromFloat(frame: Float32Array): number {
   if (frame.length === 0) return 0;
-  let mean = 0;
-  for (const sample of frame) mean += sample;
-  mean /= frame.length;
-
   let sum = 0;
-  for (const sample of frame) {
-    const centered = sample - mean;
-    sum += centered * centered;
-  }
+  for (const sample of frame) sum += sample * sample;
   return Math.sqrt(sum / frame.length);
 }
 

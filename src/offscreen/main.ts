@@ -6,27 +6,16 @@
  * boundaries and plays audio, and the worker decides what any of it means.
  */
 
+import "./workspace";
 import { ChatGPTCall } from "./chatgpt";
 import { rmsFromByteTimeDomain, bytesToBase64 } from "@/live/voice/audio-codec";
 import { DEFAULT_VAD, VoiceActivityDetector } from "@/live/voice/vad";
 import { isOffscreenCommand, type OffscreenCommand, type OffscreenEvent } from "@/live/voice/protocol";
 
 /** Analyzer cadence. The detector's thresholds are expressed in these units. */
-const FRAME_MS = 100;
-
-/** Frames between level reports to the worker, so the popup can show what the mic hears. */
-const LEVEL_REPORT_FRAMES = 5;
+const FRAME_MS = 50;
 
 const RECORDER_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
-
-/**
- * How long after playback stops the microphone stays ignored.
- *
- * The agent's own voice reaches the microphone through the speakers, and without
- * this the detector hears it, fires, and the agent interrupts itself in a loop.
- * Echo cancellation helps but cannot be relied on across devices.
- */
-const ECHO_TAIL_MS = 350;
 
 let liveCall: ChatGPTCall | null = null;
 let stream: MediaStream | null = null;
@@ -39,8 +28,6 @@ let chunks: Blob[] = [];
 /** Set when the worker abandons an utterance, so the recording is dropped unheard. */
 let discardRecording = false;
 const playing = new Set<AudioBufferSourceNode>();
-let playbackEndedAt = Number.NEGATIVE_INFINITY;
-let framesSinceLevelReport = 0;
 
 function post(event: OffscreenEvent): void {
   void chrome.runtime.sendMessage(event).catch(() => {
@@ -56,13 +43,7 @@ function pickRecorderType(): string | undefined {
 async function startListening(): Promise<void> {
   if (stream) return;
   stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      // Automatic gain is off deliberately. It amplifies the quiet conditions where
-      // the noise floor should read as silence, which destroys a level detector.
-      autoGainControl: false,
-    },
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
   context ??= new AudioContext();
   await context.resume();
@@ -70,38 +51,19 @@ async function startListening(): Promise<void> {
   const source = context.createMediaStreamSource(stream);
   analyser = context.createAnalyser();
   analyser.fftSize = 1024;
-  // Light smoothing, matching the production detector. The default of 0.8 adds so
-  // much inertia that a short word never reaches the onset level.
-  analyser.smoothingTimeConstant = 0.2;
   // Analysed only. Connecting to the destination would play the microphone back.
   source.connect(analyser);
 
   detector = new VoiceActivityDetector({ ...DEFAULT_VAD, frameMs: FRAME_MS });
-  framesSinceLevelReport = 0;
   timer = setInterval(onFrame, FRAME_MS);
   post({ source: "offscreen", type: "listening" });
 }
 
 function onFrame(): void {
   if (!analyser || !detector) return;
-  // Never listen to ourselves. Playback plus the tail below is treated as silence,
-  // so the detector's calibration and floor tracking stay honest while the agent talks.
-  if (playing.size > 0 || performance.now() - playbackEndedAt < ECHO_TAIL_MS) return;
-
   const frame = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(frame);
-  const rms = rmsFromByteTimeDomain(frame);
-  const event = detector.push(rms);
-
-  // Reported even while quiet: this is the reading needed to tell a muted microphone
-  // from a noisy room, which otherwise looks identical from the outside.
-  framesSinceLevelReport += 1;
-  if (framesSinceLevelReport >= LEVEL_REPORT_FRAMES) {
-    framesSinceLevelReport = 0;
-    const { floor, onsetRms } = detector.thresholds();
-    post({ source: "offscreen", type: "levels", rms, floor, onsetRms });
-  }
-
+  const event = detector.push(rmsFromByteTimeDomain(frame));
   if (!event) return;
 
   if (event.type === "speech-start") {
@@ -166,7 +128,6 @@ function stopPlayback(): void {
     }
   }
   playing.clear();
-  playbackEndedAt = performance.now();
 }
 
 async function play(audioBase64: string): Promise<void> {
@@ -186,10 +147,7 @@ async function play(audioBase64: string): Promise<void> {
   player.addEventListener("ended", () => {
     playing.delete(player);
     // Only the natural end reports completion; a cancelled reply does not.
-    if (playing.size === 0) {
-      playbackEndedAt = performance.now();
-      post({ source: "offscreen", type: "playback-end" });
-    }
+    if (playing.size === 0) post({ source: "offscreen", type: "playback-end" });
   });
   player.start();
 }
@@ -224,8 +182,9 @@ async function handleCommand(command: OffscreenCommand): Promise<void> {
       await call.start();
       return;
     }
-    case "chatgpt-voice":
-      liveCall?.updateVoice(command.voice);
+    case "chatgpt-delegation":
+      if (!liveCall) throw new Error("Voice session ended.");
+      liveCall.sendDelegation(command.sessionId, command.id, command.kind, command.text);
       return;
     case "listen":
       await startListening();
@@ -246,14 +205,15 @@ async function handleCommand(command: OffscreenCommand): Promise<void> {
   }
 }
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL("background/index.js")) return;
   if (!isOffscreenCommand(message)) return;
   void handleCommand(message).then(
     () => sendResponse({ ok: true }),
     (cause: unknown) => {
       const reason = cause instanceof Error ? cause.message : "The audio device failed.";
       // A denied microphone permission arrives here, and the session has to know.
-      if (message.type !== "chatgpt-start" && message.type !== "listen") post({ source: "offscreen", type: "failed", message: reason });
+      if (message.type !== "chatgpt-start" && message.type !== "chatgpt-delegation" && message.type !== "listen") post({ source: "offscreen", type: "failed", message: reason });
       sendResponse({ ok: false, error: reason });
     },
   );

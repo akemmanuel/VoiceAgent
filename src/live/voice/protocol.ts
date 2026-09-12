@@ -4,15 +4,13 @@
  * `runtime.onMessage` channel that the tab tools already use.
  */
 
-import type { ChatGPTVoice, VoiceEngine } from "@/live/settings";
-import type { ChatMessage } from "@/live/openrouter/client";
+import type { VoiceEngine } from "@/live/settings";
 import type { ConversationState } from "@/live/voice/conversation";
-import type { FrameSnapshot, PageSnapshot } from "@/lib/tab-tools";
 
 /** Worker to offscreen document. */
 export type OffscreenCommand =
   | { target: "offscreen"; type: "chatgpt-start"; sessionId: string }
-  | { target: "offscreen"; type: "chatgpt-voice"; voice: ChatGPTVoice }
+  | { target: "offscreen"; type: "chatgpt-delegation"; sessionId: string; id: string; kind: "update" | "final"; text: string }
   | { target: "offscreen"; type: "listen" }
   /** Abandon the recording in progress without transcribing it. */
   | { target: "offscreen"; type: "discard-recording" }
@@ -28,25 +26,9 @@ export type OffscreenEvent =
   | { source: "offscreen"; type: "speech-end" }
   | { source: "offscreen"; type: "utterance"; audioBase64: string; mimeType: string }
   | { source: "offscreen"; type: "playback-end" }
-  /** What the microphone currently hears, and the level speech must reach. */
-  | { source: "offscreen"; type: "levels"; rms: number; floor: number; onsetRms: number }
   | { source: "offscreen"; type: "failed"; message: string };
 
-export type VoiceRequest =
-  | { type: "voice-start" }
-  | { type: "voice-stop" }
-  | { type: "voice-status" }
-  /** A written turn uses the same browser-agent history as OpenRouter voice turns. */
-  | { type: "text-send"; text: string }
-  /** End the current conversation and remove its durable local history. */
-  | { type: "conversation-reset" };
-
-export type VoiceSettingsChangedMessage = { type: "voice-settings-changed" };
-
-export type VoiceLevels = { rms: number; floor: number; onsetRms: number };
-
-/** A concise local trace of what the browser agent attempted in its latest turn. */
-export type AgentActivity = { kind: "page-read" | "tool"; tool: string; outcome: string; failed: boolean };
+export type VoiceRequest = { type: "voice-start" } | { type: "voice-stop" } | { type: "voice-status" };
 
 export type VoiceStatus = {
   state: ConversationState;
@@ -57,22 +39,9 @@ export type VoiceStatus = {
   /** Most recent reply, so the user can read what was spoken. */
   reply: string;
   error: string | null;
-  /** Live microphone reading, so a muted mic and a noisy room can be told apart. */
-  levels: VoiceLevels | null;
-  /** Local diagnostic trace; page contents and prompts are never included here. */
-  activity: AgentActivity[];
 };
 
 export type VoiceStatusMessage = { type: "voice-status-changed"; status: VoiceStatus };
-
-/** Returned only after an explicit click in the extension UI. Contains no credentials. */
-export type VoiceDebugReport = {
-  generatedAt: string;
-  extensionVersion: string;
-  status: VoiceStatus;
-  conversationHistory: ChatMessage[];
-  activePage: { ok: boolean; snapshot?: PageSnapshot; frames?: FrameSnapshot[]; error?: string };
-};
 
 export function isOffscreenCommand(message: unknown): message is OffscreenCommand {
   return typeof message === "object" && message !== null && (message as { target?: unknown }).target === "offscreen";
@@ -83,8 +52,6 @@ export function isOffscreenEvent(message: unknown): message is OffscreenEvent {
 }
 
 export function isVoiceRequest(message: unknown): message is VoiceRequest {
-  const candidate = message as { type?: unknown; text?: unknown } | null;
-  const type = candidate?.type;
-  if (type === "text-send") return typeof candidate?.text === "string";
-  return type === "voice-start" || type === "voice-stop" || type === "voice-status" || type === "conversation-reset";
+  const type = (message as { type?: unknown } | null)?.type;
+  return type === "voice-start" || type === "voice-stop" || type === "voice-status";
 }

@@ -7,27 +7,12 @@
  * through a message.
  */
 
-import type { AutomationProgram, AutomationResult, FrameSnapshot, InteractiveElement, PageSnapshot, TabAction, TabToolResponse } from "@/lib/tab-tools";
+import type { AutomationProgram, AutomationResult, InteractiveElement, PageSnapshot, TabAction, TabToolResponse } from "@/lib/tab-tools";
 import type { ToolDefinition } from "@/live/openrouter/client";
 import { formatParsedTable, parseDelimitedText } from "./data-tools";
 import { formatParsedPdf, readPdfFromUrl } from "./pdf-tools";
 
 export const BROWSER_TOOLS: ToolDefinition[] = [
-  {
-    name: "search-web",
-    description: "Open a normal Google search tab for a query. Use this when information is missing from the current page and research is needed; then inspect the active search tab and its sources.",
-    parameters: { type: "object", properties: { query: { type: "string", description: "The web search query." } }, required: ["query"], additionalProperties: false },
-  },
-  {
-    name: "list-tabs",
-    description: "List the current browser tabs with IDs, titles, URLs, and active state. Use it to return to the user's original task after research.",
-    parameters: { type: "object", properties: {}, additionalProperties: false },
-  },
-  {
-    name: "activate-tab",
-    description: "Make an existing browser tab active by its ID, for example to return from research to the user's original tab.",
-    parameters: { type: "object", properties: { tabId: { type: "number", description: "Tab ID returned by list-tabs." } }, required: ["tabId"], additionalProperties: false },
-  },
   {
     name: "read-pdf",
     description: "Fetch a PDF from an http(s) URL and extract its text locally. Reads at most 20 MB, 40 pages, and 100000 characters. Use this to understand documents before answering or sorting them.",
@@ -57,7 +42,7 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
   },
   {
     name: "inspect-active-tab",
-    description: "Read the visible text, title, URL, and interactive controls of the active tab, including accessible same-origin iframes and open Shadow DOM controls. Iframe results include a frameId for targeted actions.",
+    description: "Read the visible text, title, URL, and interactive controls of the browser tab the user is looking at.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -74,7 +59,6 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
         selector: { type: "string", description: "Optional CSS selector to wait for." },
         text: { type: "string", description: "Optional visible text to wait for." },
         timeoutMs: { type: "number", description: "Wait time from 250 to 30000 milliseconds; defaults to 10000." },
-        frameId: { type: "number", description: "Optional frameId returned by inspect-active-tab." },
       },
       additionalProperties: false,
     },
@@ -89,7 +73,6 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
           type: "object",
           properties: {
             steps: { type: "array", description: "At most 25 declarative steps. for-each supports operation click or read and max 50 matches." },
-            frameId: { type: "number", description: "Optional iframe id returned by inspect-active-tab." },
           },
           required: ["steps"],
           additionalProperties: false,
@@ -120,7 +103,6 @@ export const BROWSER_TOOLS: ToolDefinition[] = [
         label: { type: "string", description: "Optional short caption for a highlight." },
         message: { type: "string", description: "What the user should do. Required for request-user-action." },
         durationSeconds: { type: "number", description: "How long a highlight or request stays on screen, 1 to 60 seconds. Defaults to 8." },
-        frameId: { type: "number", description: "Optional iframe id returned by inspect-active-tab." },
       },
       required: ["kind"],
       additionalProperties: false,
@@ -137,29 +119,31 @@ export function formatSnapshot(snapshot: PageSnapshot): string {
   return [`Page: ${snapshot.title}`, `URL: ${snapshot.url}`, `Viewport: ${snapshot.viewport.width}×${snapshot.viewport.height} at ${snapshot.viewport.scrollX},${snapshot.viewport.scrollY}`, "", snapshot.text, controls ? `\nControls:\n${controls}` : ""].join("\n").trim();
 }
 
-export async function handleTabToolRequest(request: { type: string; action?: TabAction; program?: AutomationProgram }): Promise<TabToolResponse> {
+export async function handleTabToolRequest(request: { type: string; action?: TabAction; program?: AutomationProgram; tabId?: number }, signal?: AbortSignal): Promise<TabToolResponse> {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    signal?.throwIfAborted();
+    const tab = request.tabId !== undefined ? await chrome.tabs.get(request.tabId) : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0];
+    signal?.throwIfAborted();
     if (!tab?.id) return { ok: false, error: "No active browser tab is available." };
 
     if (request.type === "capture-active-tab") {
+      if (!tab.active) return { ok: false, error: "The selected tab is not visible. Focus it with browser-navigate before capturing a screenshot." };
       const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
       return { ok: true, screenshot };
     }
 
     if (request.type === "inspect-active-tab") {
-      const result = await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: inspectPage });
-      const frames = result.flatMap(item => item.result ? [{ frameId: item.frameId, page: item.result as PageSnapshot }] : []) as FrameSnapshot[];
-      const snapshot = frames.find(frame => frame.frameId === 0)?.page;
-      return snapshot ? { ok: true, snapshot, frames } : { ok: false, error: "The page returned no readable content." };
+      const result = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: inspectPage });
+      const snapshot = result[0]?.result as PageSnapshot | undefined;
+      return snapshot ? { ok: true, snapshot } : { ok: false, error: "The page returned no readable content." };
     }
 
     if (request.type === "wait-for-active-tab") {
-      const waiting = request as { selector?: string; text?: string; timeoutMs?: number; frameId?: number };
+      const waiting = request as { selector?: string; text?: string; timeoutMs?: number };
       const result = await chrome.scripting.executeScript({
-        target: { tabId: tab.id, ...(Number.isInteger(waiting.frameId) ? { frameIds: [waiting.frameId!] } : {}) },
+        target: { tabId: tab.id },
         func: waitForPageState,
-        args: [waiting.selector, waiting.text, waiting.timeoutMs],
+        args: [waiting.selector ?? null, waiting.text ?? null, waiting.timeoutMs ?? null],
       });
       const found = result[0]?.result === true;
       return { ok: true, found, message: found ? "The requested page state appeared." : "Timed out waiting for the requested page state." };
@@ -167,9 +151,22 @@ export async function handleTabToolRequest(request: { type: string; action?: Tab
 
     if (request.type === "run-automation") {
       if (!request.program) return { ok: false, error: "Automation needs a program." };
-      const result = await chrome.scripting.executeScript({ target: { tabId: tab.id, ...(Number.isInteger(request.program.frameId) ? { frameIds: [request.program.frameId!] } : {}) }, func: runAutomation, args: [request.program] });
-      const automation = result[0]?.result as AutomationResult | undefined;
-      const inspected = await chrome.scripting.executeScript({ target: { tabId: tab.id, ...(Number.isInteger(request.program.frameId) ? { frameIds: [request.program.frameId!] } : {}) }, func: inspectPage });
+      const token = crypto.randomUUID();
+      const cancel = () => {
+        void chrome.scripting.executeScript({ target: { tabId: tab.id! }, func: (token: string) => {
+          const state = (globalThis as any).__voiceAgentAutomation;
+          if (state?.token === token) state.cancelled = true;
+        }, args: [token] }).catch(() => {});
+      };
+      signal?.addEventListener("abort", cancel, { once: true });
+      let automation: AutomationResult | undefined;
+      try {
+        signal?.throwIfAborted();
+        const result = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: runAutomation, args: [request.program, token] });
+        signal?.throwIfAborted();
+        automation = result[0]?.result as AutomationResult | undefined;
+      } finally { signal?.removeEventListener("abort", cancel); }
+      const inspected = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: inspectPage });
       const snapshot = inspected[0]?.result as PageSnapshot | undefined;
       return automation && snapshot ? { ok: true, automation, snapshot, message: "Automation completed and the page was checked." } : { ok: false, error: "The automation did not return a valid result." };
     }
@@ -177,7 +174,7 @@ export async function handleTabToolRequest(request: { type: string; action?: Tab
     const action = request.action;
     if (!action) return { ok: false, error: "That action needs a kind." };
     const result = await chrome.scripting.executeScript({
-      target: { tabId: tab.id, ...(Number.isInteger(action.frameId) ? { frameIds: [action.frameId!] } : {}) },
+      target: { tabId: tab.id },
       func: performAction,
       args: [action],
     });
@@ -190,7 +187,8 @@ export async function handleTabToolRequest(request: { type: string; action?: Tab
 }
 
 /** Runs one tool call and returns the text the model should see. */
-export async function executeBrowserTool(name: string, args: string): Promise<string> {
+export async function executeBrowserTool(name: string, args: string, tabId?: number, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   let parsed: Record<string, unknown> = {};
   try {
     const value = JSON.parse(args) as unknown;
@@ -199,26 +197,9 @@ export async function executeBrowserTool(name: string, args: string): Promise<st
     return "The arguments were not valid JSON. Call the tool again with valid arguments.";
   }
 
-  if (name === "search-web") {
-    if (typeof parsed.query !== "string" || !parsed.query.trim()) return "search-web needs a non-empty query.";
-    const tab = await chrome.tabs.create({ url: `https://www.google.com/search?q=${encodeURIComponent(parsed.query)}`, active: true });
-    return `Opened a search tab${tab.id ? ` (${tab.id})` : ""} for: ${parsed.query}.`;
-  }
-
-  if (name === "list-tabs") {
-    const tabs = await chrome.tabs.query({ currentWindow: true });
-    return tabs.map(tab => `${tab.id ?? "?"}${tab.active ? " [active]" : ""} — ${tab.title ?? "Untitled"} — ${tab.url ?? ""}`).join("\n") || "No browser tabs were found.";
-  }
-
-  if (name === "activate-tab") {
-    if (!Number.isInteger(parsed.tabId)) return "activate-tab needs a numeric tabId.";
-    const tab = await chrome.tabs.update(parsed.tabId as number, { active: true });
-    return `Activated tab ${tab?.id ?? parsed.tabId}.`;
-  }
-
   if (name === "read-pdf") {
     if (typeof parsed.url !== "string") return "read-pdf needs a PDF url.";
-    try { return formatParsedPdf(await readPdfFromUrl(parsed.url)); }
+    try { return formatParsedPdf(await readPdfFromUrl(parsed.url, signal)); }
     catch (cause) { return cause instanceof Error ? cause.message : "The PDF could not be read."; }
   }
 
@@ -248,21 +229,19 @@ export async function executeBrowserTool(name: string, args: string): Promise<st
 
   if (name === "inspect-active-tab" || name === "capture-active-tab" || name === "wait-for-active-tab") {
     const response = name === "wait-for-active-tab"
-      ? await handleTabToolRequest({ type: name, ...parsed } as { type: string })
-      : await handleTabToolRequest({ type: name });
+      ? await handleTabToolRequest({ ...parsed, type: name, tabId }, signal)
+      : await handleTabToolRequest({ type: name, tabId }, signal);
     if (!response.ok) return response.error;
     if (name === "capture-active-tab") return response.screenshot ? "Captured a screenshot of the visible tab." : "The screenshot was empty.";
     if (name === "wait-for-active-tab") return response.message ?? "Finished waiting.";
-    if (!response.snapshot) return "The page had no readable content.";
-    const frames = response.frames?.filter(frame => frame.frameId !== 0).map(frame => `\nIframe ${frame.frameId}:\n${formatSnapshot(frame.page)}`).join("\n") ?? "";
-    return `${formatSnapshot(response.snapshot)}${frames}`;
+    return response.snapshot ? formatSnapshot(response.snapshot) : "The page had no readable content.";
   }
 
   if (name === "run-automation") {
-    const response = await handleTabToolRequest({ type: name, program: parsed.program as AutomationProgram });
+    const response = await handleTabToolRequest({ type: name, program: parsed.program as AutomationProgram, tabId }, signal);
     if (!response.ok) return response.error;
     const summary = response.automation ? `Completed ${response.automation.completed} operations; skipped ${response.automation.skippedFinalActions} final actions.` : "No automation result.";
-    return `${summary}\n\nPage after automation:\n${response.snapshot ? formatSnapshot(response.snapshot) : "No page snapshot."}`;
+    return `${summary}\nOutputs: ${JSON.stringify(response.automation?.outputs ?? {})}\n\nPage after automation:\n${response.snapshot ? formatSnapshot(response.snapshot) : "No page snapshot."}`;
   }
 
   if (name === "act-on-active-tab") {
@@ -271,7 +250,7 @@ export async function executeBrowserTool(name: string, args: string): Promise<st
       return "An action needs a kind of click, type, scroll, highlight, or request-user-action.";
     }
     const action = { ...parsed, kind } as unknown as TabAction;
-    const response = await handleTabToolRequest({ type: "act-on-active-tab", action });
+    const response = await handleTabToolRequest({ type: "act-on-active-tab", action, tabId }, signal);
     return response.ok ? response.message ?? "The action was applied." : response.error;
   }
 
@@ -280,18 +259,13 @@ export async function executeBrowserTool(name: string, args: string): Promise<st
 
 function inspectPage(): PageSnapshot {
   const selectorFor = (element: Element): string => {
-    const root = element.getRootNode();
-    const prefix = root instanceof ShadowRoot ? `${selectorFor(root.host)} >>> ` : "";
-    if (element.id) return `${prefix}#${CSS.escape(element.id)}`;
+    if (element.id) return `#${CSS.escape(element.id)}`;
     const name = element.getAttribute("name");
-    if (name) return `${prefix}${element.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
+    if (name) return `${element.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
     const testId = element.getAttribute("data-testid");
-    if (testId) return `${prefix}[data-testid="${CSS.escape(testId)}"]`;
+    if (testId) return `[data-testid="${CSS.escape(testId)}"]`;
     const parent = element.parentElement;
-    if (!parent) {
-      if (root instanceof ShadowRoot) return `${selectorFor(root.host)} >>> ${element.tagName.toLowerCase()}`;
-      return element.tagName.toLowerCase();
-    }
+    if (!parent) return element.tagName.toLowerCase();
     const siblings = [...parent.children].filter(child => child.tagName === element.tagName);
     return `${selectorFor(parent)} > ${element.tagName.toLowerCase()}:nth-of-type(${siblings.indexOf(element) + 1})`;
   };
@@ -300,12 +274,7 @@ function inspectPage(): PageSnapshot {
     const text = (element as HTMLElement).innerText || element.getAttribute("placeholder") || element.getAttribute("title") || "";
     return (aria || text).replace(/\s+/g, " ").trim().slice(0, 160);
   };
-  const interactiveSelector = "a, button, input, textarea, select, [role='button'], [contenteditable='true']";
-  const roots: ParentNode[] = [document];
-  for (let index = 0; index < roots.length; index++) {
-    for (const element of roots[index]!.querySelectorAll("*")) if (element.shadowRoot) roots.push(element.shadowRoot);
-  }
-  const interactiveElements: InteractiveElement[] = roots.flatMap(root => [...root.querySelectorAll(interactiveSelector)])
+  const interactiveElements: InteractiveElement[] = [...document.querySelectorAll("a, button, input, textarea, select, [role='button'], [contenteditable='true']")]
     .filter(element => {
       const style = getComputedStyle(element);
       return style.display !== "none" && style.visibility !== "hidden";
@@ -343,21 +312,9 @@ function inspectPage(): PageSnapshot {
   };
 }
 
-function waitForPageState(selector: string | undefined, text: string | undefined, timeoutMs: number | undefined): Promise<boolean> {
+function waitForPageState(selector: string | null, text: string | null, timeoutMs: number | null): Promise<boolean> {
   const limit = Math.max(250, Math.min(30_000, Number.isFinite(timeoutMs) ? timeoutMs! : 10_000));
-  const find = (value: string) => {
-    const parts = value.split(/\s*>>>\s*/);
-    let root: Document | ShadowRoot = document;
-    let element: Element | null = null;
-    for (const [index, part] of parts.entries()) {
-      element = root.querySelector(part);
-      if (!element || index === parts.length - 1) return element;
-      if (!element.shadowRoot) return null;
-      root = element.shadowRoot;
-    }
-    return element;
-  };
-  const matches = () => (!selector || !!find(selector)) && (!text || document.body?.innerText.includes(text));
+  const matches = () => (!selector || !!document.querySelector(selector)) && (!text || document.body?.innerText.includes(text));
   if (matches()) return Promise.resolve(true);
   return new Promise(resolve => {
     const observer = new MutationObserver(() => {
@@ -375,18 +332,14 @@ function waitForPageState(selector: string | undefined, text: string | undefined
 }
 
 function performAction(action: TabAction): string {
-  const find = (selector: string) => {
-    const parts = selector.split(/\s*>>>\s*/);
-    let root: Document | ShadowRoot = document;
-    let element: Element | null = null;
-    for (const [index, part] of parts.entries()) {
-      element = root.querySelector(part);
-      if (!element || index === parts.length - 1) return element;
-      if (!element.shadowRoot) return null;
-      root = element.shadowRoot;
-    }
-    return element;
+  // executeScript serializes this function, so helpers must live inside it.
+  const dispatchKey = (element: Element, action: Extract<TabAction, { kind: "press-key" }>) => {
+    const options = { key: action.key, bubbles: true, cancelable: true, ctrlKey: action.ctrlKey, altKey: action.altKey, shiftKey: action.shiftKey, metaKey: action.metaKey };
+    element.dispatchEvent(new KeyboardEvent("keydown", options));
+    element.dispatchEvent(new KeyboardEvent("keypress", options));
+    element.dispatchEvent(new KeyboardEvent("keyup", options));
   };
+  if (!["click", "type", "scroll", "press-key", "select-option", "set-checked", "highlight", "request-user-action"].includes(action.kind)) throw new Error("Unsupported browser action.");
   const durationFor = (value: number | undefined) => {
     const requestedDuration = value ?? 8;
     return Number.isFinite(requestedDuration) ? Math.max(1, Math.min(60, requestedDuration)) : 8;
@@ -428,13 +381,14 @@ function performAction(action: TabAction): string {
   if (action.kind === "press-key" && !action.selector) {
     const target = document.activeElement;
     if (!(target instanceof HTMLElement)) throw new Error("No focusable element is active.");
+    if (["Enter", " "].includes(action.key)) throw new Error("Use click or request-user-action instead of a key that can submit a form.");
     dispatchKey(target, action);
     return `Pressed ${action.key}.`;
   }
 
   const selector = action.selector;
   if (!selector) throw new Error("This action requires a selector.");
-  const element = find(selector);
+  const element = document.querySelector(selector);
   if (!element) throw new Error(`No element matches ${selector}.`);
 
   if (action.kind === "highlight") {
@@ -450,6 +404,7 @@ function performAction(action: TabAction): string {
   }
 
   if (action.kind === "press-key") {
+    if (["Enter", " "].includes(action.key)) throw new Error("Use click or request-user-action instead of a key that can submit a form.");
     dispatchKey(element, action);
     return `Pressed ${action.key}.`;
   }
@@ -493,11 +448,9 @@ function performAction(action: TabAction): string {
   element.focus();
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
-    for (const character of action.text) {
-      dispatchKey(element, { kind: "press-key", key: character });
-      setter?.call(element, `${element.value}${character}`);
-      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: character }));
-    }
+    if (typeof action.text !== "string") throw new Error("Typing requires text.");
+    setter?.call(element, action.text);
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: action.text }));
   } else {
     element.textContent = action.text;
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: action.text }));
@@ -506,18 +459,13 @@ function performAction(action: TabAction): string {
   return "Entered text in the selected element.";
 }
 
-function dispatchKey(element: Element, action: Extract<TabAction, { kind: "press-key" }>) {
-  const options = { key: action.key, bubbles: true, cancelable: true, ctrlKey: action.ctrlKey, altKey: action.altKey, shiftKey: action.shiftKey, metaKey: action.metaKey };
-  element.dispatchEvent(new KeyboardEvent("keydown", options));
-  element.dispatchEvent(new KeyboardEvent("keypress", options));
-  element.dispatchEvent(new KeyboardEvent("keyup", options));
-}
-
 /** Executes data-only operations in the tab. No eval, fetch, extension APIs, or page-context code is exposed. */
-async function runAutomation(program: AutomationProgram): Promise<AutomationResult> {
+async function runAutomation(program: AutomationProgram, token: string): Promise<AutomationResult> {
   if (!program || !Array.isArray(program.steps) || program.steps.length > 25) {
     throw new Error("Automation programs need at most 25 steps.");
   }
+  const state = { token, cancelled: false };
+  (globalThis as any).__voiceAgentAutomation = state;
   const deadline = Date.now() + 30_000;
   let completed = 0;
   let skippedFinalActions = 0;
@@ -528,13 +476,15 @@ async function runAutomation(program: AutomationProgram): Promise<AutomationResu
   const wait = (selector: string | undefined, text: string | undefined, timeout: number) => new Promise<void>((resolve, reject) => {
     const stopAt = Date.now() + Math.max(250, Math.min(10_000, timeout));
     const timer = window.setInterval(() => {
-      if (Date.now() > deadline || Date.now() > stopAt) { clearInterval(timer); reject(new Error("Timed out waiting during automation.")); return; }
+      if (state.cancelled || Date.now() > deadline || Date.now() > stopAt) { clearInterval(timer); reject(new Error("Timed out waiting during automation.")); return; }
       if ((!selector || document.querySelector(selector)) && (!text || document.body?.innerText.includes(text))) { clearInterval(timer); resolve(); }
     }, 100);
   });
 
   for (const rawStep of program.steps) {
-    if (Date.now() > deadline || completed >= 100) throw new Error("Automation reached its safety limit.");
+    // Yield so a session-stop message can cancel between page mutations.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    if (state.cancelled || Date.now() > deadline || completed >= 100) throw new Error("Automation reached its safety limit.");
     if (!rawStep || typeof rawStep !== "object" || Array.isArray(rawStep)) throw new Error("Every automation step must be an object.");
     const step = rawStep as Record<string, unknown>;
     const op = step.op;
@@ -570,7 +520,8 @@ async function runAutomation(program: AutomationProgram): Promise<AutomationResu
       const limit = Math.max(1, Math.min(50, typeof step.limit === "number" ? step.limit : 20));
       const elements = [...document.querySelectorAll(selector!)] .slice(0, limit);
       for (const item of elements) {
-        if (Date.now() > deadline || completed >= 100) throw new Error("Automation reached its safety limit.");
+        await new Promise(resolve => setTimeout(resolve, 0));
+        if (state.cancelled || Date.now() > deadline || completed >= 100) throw new Error("Automation reached its safety limit.");
         if (operation === "read") record(typeof step.key === "string" ? step.key : "items", [(item as HTMLElement).innerText || item.textContent || ""]);
         else if (finalAction(item)) skippedFinalActions++;
         else { (item as HTMLElement).click(); completed++; }

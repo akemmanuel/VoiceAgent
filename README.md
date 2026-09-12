@@ -6,26 +6,16 @@ Manifest V3 browser extension starter for Chrome and Edge. Uses React, TypeScrip
 
 ```bash
 bun install
-bun run dev
+bun run build
 ```
-
-`bun run dev` builds the extension and launches a separate Chrome/Edge development profile with `dist/` loaded. Use `bun run open` to reopen the existing build without rebuilding. Set `BROWSER_PATH` if the browser executable is not detected automatically.
-
-To load it manually, run `bun run build`, then:
 
 1. Open `chrome://extensions` or `edge://extensions`.
 2. Turn on Developer mode.
 3. Click **Load unpacked** and select this project's `dist/` directory.
-4. Pin VoiceAgent and click its icon to open its side panel. The browser lets you place the panel on the left or right.
+4. Pin VoiceAgent and click its icon to open the popup.
 5. Click **Open settings** to open the options page.
 
 After editing, run `bun run build`, reload the extension on the Extensions page, and reopen the popup or refresh settings. There is no development server or hot reload.
-
-### Reloading properly
-
-**Restarting the browser is not enough.** Chromium keeps the extension's service worker script in the profile, and a browser restart reuses it. Ordinary pages such as the popup, the side panel, and the offscreen document are re-read from disk, so they pick up changes while the worker keeps running old code. The result is an extension that is half updated: the UI behaves one way and the worker another, which looks like a bug in whichever half you are looking at.
-
-Reload the extension itself after every build, using **Reload** on `chrome://extensions`, and reopen the side panel. If a change to background code still seems absent, the service worker cache is the reason and reloading until the behaviour changes is the fix.
 
 ## Checks
 
@@ -64,7 +54,25 @@ scripts/
 
 The build copies HTML templates and public files into `dist/`, bundles JavaScript with Bun, and compiles Tailwind separately. HTML templates reference the resulting JavaScript and CSS files. The build deletes and recreates only `dist/`.
 
-## Browser tab tools
+## Luna's workspace
+
+Luna has exactly four tools: **read, write, edit, and shell**. `shell` runs native browser JavaScript with a persistent REPL, top-level `await`, and browser APIs. There is no QuickJS or Bash process. Virtual files persist across sessions and browser restarts in IndexedDB.
+
+```js
+const tab = await browser.tabs.open('https://example.com');
+await browser.page.evaluate(tab.id, () => document.title);
+await fs.write('/workspace/title.txt', await browser.page.evaluate(tab.id, () => document.title));
+await display(await browser.page.screenshot(tab.id));
+await browser.tabs.close(tab.id);
+```
+
+The workspace can manipulate pages, open/close/navigate tabs, fetch URLs, download files, and import browser-compatible libraries. Page evaluation uses the `debugger` permission, which can show Chrome's debugging banner. Protected pages remain unscriptable even when their tabs can be opened or closed. Stop terminates the REPL without deleting saved files; already-applied actions cannot be undone. Confirmations are governed by agent instructions, not button-label blockers.
+
+See [the workspace contract](docs/delegated-agent.md) for APIs, REPL semantics, isolation, and testing. Reload the extension and accept its new debugger permission after building.
+
+## Legacy popup and OpenRouter tab tools
+
+The following direct tools remain for the popup and OpenRouter engine, not Luna.
 
 VoiceAgent requests persistent access to all ordinary websites through `<all_urls>`, plus `tabs` permission to inspect tab metadata. No popup click is needed to grant temporary access, although users can still restrict site access in browser settings. The **Read active tab** control extracts its visible text and a bounded list of interactive controls, including bounds, visibility, overlay detection, disabled/checked/expanded state, and native dropdown options; **Capture visible tab** returns a PNG screenshot of the visible viewport. The popup also exposes basic click, text-entry, scroll, and visual highlight actions through CSS selectors. The agent tools additionally support waiting for dynamic DOM text or selectors, keyboard input, native dropdown selection, and checkbox/radio selection. A highlight scrolls the target into view, draws an amber outline, can display a short explanation label, and disappears automatically after the agent-provided duration (1–60 seconds; 8 seconds by default). The `request-user-action` tool uses the same visual guidance for final steps, such as sending a message or completing a payment: it highlights and explains the control, but leaves the click to the user. As a fallback, obvious final-action labels are also never clicked automatically. This is useful when the agent teaches a user how to work in apps such as Odoo or Excel Online. The existing tools still target the active tab; explicit tab-ID targeting is not implemented yet. Browser-owned pages (for example `chrome://`) and other protected pages cannot be scripted. Local file access requires enabling the browser's file-URL access setting, and incognito access requires a separate opt-in. Password fields are never filled.
 
@@ -76,13 +84,9 @@ For repetitive work, `run-automation` accepts a small declarative program with `
 
 `read-pdf` fetches an http(s) PDF and extracts its text locally with PDF.js (up to 20 MB, 40 pages, and 100,000 characters). `download-file` saves an http(s) URL with a safe relative path such as `Classroom/Math/week-03/worksheet.pdf`; Chrome never overwrites an existing file.
 
-Tab inspection traverses open Shadow DOM trees and emits selectors using `>>>` for shadow boundaries. It also inspects scriptable iframes and returns their `frameId`; pass that frame ID to tab actions, waiting, or automation when a control belongs to an iframe. Closed Shadow DOMs and frames that Chrome does not permit the extension to script remain unavailable.
-
-For general research, `search-web` opens a normal Google results tab instead of calling a hidden search service. The agent can inspect those results, use `list-tabs` to retain the user's original context, and `activate-tab` to return to it after research.
-
 ### Browser-agent roadmap
 
-Implemented model tools are: inspection, visible-tab capture, dynamic waiting, bounded repetitive automation, and direct tab actions. The remaining capabilities are document download/parse/upload, full-page capture, open Shadow DOM and same-origin iframe traversal, cookie-banner guidance, structured extraction, and cross-tab workflows. Full Chrome Debugger accessibility/network inspection is intentionally deferred because it carries substantially broader page-debugging access than the current tools.
+Implemented model tools are: inspection, visible-tab capture, dynamic waiting, bounded repetitive automation, and direct tab actions. The remaining capabilities are document download/parse/upload, full-page capture, open Shadow DOM and same-origin iframe traversal, cookie-banner guidance, structured extraction, and cross-tab workflows. The legacy tools do not expose Chrome Debugger inspection. Luna's separate native-JS workspace now uses the debugger API for arbitrary page evaluation.
 
 ## ChatGPT sign-in
 
@@ -106,27 +110,15 @@ The key is entered on the settings page and stored in `chrome.storage.local`. It
 
 ## Voice sessions
 
-**Start voice session** in the popup opens the microphone and runs the loop: detect speech, transcribe it, let the model decide whether to use a browser tool, then speak the reply. **Stop voice session** closes the microphone. The popup also has a written-message field beside the larger microphone control. With the OpenRouter engine, speech and writing use the same browser-agent loop and one retained conversation history; changing input method never starts a new conversation. The context and the most recent exchange are stored locally by the extension, so they survive a side-panel reload, navigation, and an MV3 worker restart. **New conversation** stops active audio, permanently removes that local context, and starts an empty session. Sending a written message while the microphone is active stops audio capture first, while retaining that history. Typed replies stay written and are not played aloud.
-
-Written browser-agent chat currently requires the OpenRouter engine and its API key. The separate ChatGPT engine is a realtime speech session and does not expose the tool-capable chat API used by the extension, so the popup explains how to switch rather than silently creating a different conversation.
+**Start voice session** in the popup opens the microphone and runs the loop: detect speech, transcribe it, let the model decide whether to use a browser tool, then speak the reply. **Stop voice session** closes the microphone. The popup shows the live state, the last thing it heard, and the last reply.
 
 Microphone capture and playback live in an offscreen document, because an MV3 service worker cannot call `getUserMedia`. That document stays mechanical: it reports speech boundaries and plays audio, and owns no conversation logic. The worker decides what any of it means.
 
 Turn-taking is an explicit state machine in `src/live/voice/conversation.ts`, kept pure so it can be tested without a microphone: `listening -> capturing -> transcribing -> thinking -> speaking -> listening`. Speaking over the agent counts as a barge-in, which cuts playback, cancels the turn in flight, and starts listening again without releasing the microphone. A late reply from a cancelled turn is discarded rather than spoken.
 
-Speech detection in `src/live/voice/vad.ts` is energy-based with two thresholds, so speech has to be loud to start an utterance but only needs to stay above a lower bar to continue. A pause mid-sentence therefore does not split one sentence into two turns.
+Speech detection in `src/live/voice/vad.ts` is energy-based with two thresholds, so speech has to be loud to start an utterance but only needs to stay above a lower bar to continue. A pause mid-sentence therefore does not split one sentence into two turns. It is not a learned VAD, so steady background noise needs its thresholds raised.
 
-The thresholds are relative to an ambient floor tracked continuously, not fixed levels. Fixed levels cannot work across devices: a laptop microphone with gain applied can idle above the level a quiet headset reaches while someone is talking, which reads as permanent speech. The floor falls quickly toward any quieter frame and rises slowly, so a transient noise does not leave the detector deaf while one long sentence cannot teach it that talking is the baseline. Onset is a multiple of the floor, and the stop level is clamped so it can never exceed the onset.
-
-This follows the silence detector already running in production in `dezarpa/runtime/browser.ts`. The earlier version here had a real bug that only appeared on a real microphone: its onset window accumulated on frames that cleared the stop level rather than the onset, and the counter it did keep was never read. A room whose noise sat between the two levels therefore produced an endless stream of false onsets, each opening a capture nothing could close, which the popup showed as permanently hearing you. An onset now requires `minSpeechMs` of frames above the onset, a stalled onset returns to idle so the floor keeps tracking, and `maxUtteranceMs` cuts a monologue so capture can never be left open.
-
-Two more details matter for correctness rather than tuning. Levels are measured with the frame's mean removed: an analyzer frame rests near 128 rather than 0, and a constant bias of only three counts reads as 0.023 RMS, above a typical onset, so without this a silent microphone with a small offset looks like continuous speech. And the detector is fed nothing while the agent is speaking, plus a short tail, because the agent's own voice reaches the microphone through the speakers and would otherwise interrupt itself in a loop. The popup shows the live level, the tracked floor, and the level speech must reach, which is what tells a muted microphone apart from a noisy room.
-
-Automatic gain control is deliberately disabled on the microphone, because it amplifies exactly the quiet conditions where the floor should read as silence.
-
-The agent turn in `src/live/voice/turn.ts` receives a fresh active-tab snapshot before every OpenRouter request, then runs a bounded tool loop over the tools in `src/background/tab-tools.ts`. This means that a request such as “enable this app in the open Nextcloud administration page” starts with the actual page and its controls, rather than relying on the model to choose an initial read operation. Page text is explicitly treated as untrusted data, never as instructions. Repeated user-authorized work, such as updating all visible apps, should use bounded `run-automation`/`for-each` rather than stopping after one routine click. A tool failure is reported back to the model rather than ending the turn. The loop allows 16 model rounds, enough for ordinary multi-page admin work while still preventing an unlimited spend.
-
-The side panel's **Download debug report** button creates a local JSON file only after the user clicks it. It includes the extension version, current state, concise agent activity, the retained agent conversation/tool history, and a fresh DOM snapshot of the active page with its visible controls. It deliberately contains no OpenRouter key or ChatGPT token. The report can contain private page and conversation content, so inspect it before sharing it for troubleshooting.
+The agent turn in `src/live/voice/turn.ts` runs a bounded tool loop over the tools in `src/background/tab-tools.ts`. A tool failure is reported back to the model rather than ending the turn, and the loop stops after `DEFAULT_MAX_TOOL_STEPS` rounds so a model that keeps calling tools cannot spend the user's balance indefinitely.
 
 ## Responsibilities
 
@@ -136,9 +128,9 @@ The side panel's **Download debug report** button creates a local JSON file only
 
 ## Scope
 
-VoiceAgent opens as a browser side panel rather than a transient toolbar popup. The panel stays open while normal webpages reload and while the user moves between tabs, so it is the persistent surface for tab tools, voice controls, written chat, and settings. The browser owns its left/right placement and the user may close it at any time. The settings page signs in to ChatGPT, stores those tokens, and holds OpenRouter settings. The OpenRouter engine can hold a spoken conversation; the ChatGPT engine still cannot, and says so rather than failing silently when selected.
+The popup exposes tab tools, voice controls, and opens settings. The settings page signs in to ChatGPT, stores those tokens, and holds OpenRouter settings. The OpenRouter engine can hold a spoken conversation; the ChatGPT engine still cannot, and says so rather than failing silently when selected.
 
-The extension requests `tabs`, `scripting`, and `storage`, with persistent `<all_urls>` host access for browser tools and network requests, and `offscreen` for microphone capture and playback. This includes both engine hosts. Broad host access does not bypass browser security restrictions or change the privileged pages' content security policy. There are no content scripts. Register future worker listeners at module scope; MV3 workers can stop when idle, so globals are not durable storage.
+The extension requests `tabs`, `scripting`, `storage`, `downloads`, and `debugger`, with persistent `<all_urls>` host access for browser tools and network requests, and `offscreen` for audio and the sandboxed native-JS workspace. This includes both engine hosts. Broad host access does not bypass browser security restrictions or change the privileged pages' content security policy. There are no content scripts. Register future worker listeners at module scope; MV3 workers can stop when idle, so globals are not durable storage.
 
 ## Verification
 

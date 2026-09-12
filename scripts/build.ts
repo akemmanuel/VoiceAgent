@@ -21,7 +21,15 @@ const result = await Bun.build({
 });
 if (!result.success) throw new AggregateError(result.logs, "Extension bundle failed");
 
-for (const page of ["popup", "options", "offscreen"]) {
+// The sandbox's Worker source is embedded locally, not fetched from an opaque origin.
+const worker = await Bun.build({ entrypoints: [join(root, "src/repl/worker.ts")], target: "browser", format: "iife", minify: true });
+if (!worker.success) throw new AggregateError(worker.logs, "REPL Worker bundle failed");
+const sandbox = await Bun.build({ entrypoints: [join(root, "src/repl/sandbox.ts")], outdir: join(dist, "repl"), naming: "sandbox.js", target: "browser", format: "iife", minify: true,
+  define: { __REPL_WORKER_SOURCE__: JSON.stringify(await worker.outputs[0]!.text()) },
+});
+if (!sandbox.success) throw new AggregateError(sandbox.logs, "REPL sandbox bundle failed");
+
+for (const page of ["popup", "options", "offscreen", "repl"]) {
   await Bun.write(join(dist, page, "index.html"), Bun.file(join(root, "src", page, "index.html")));
 }
 

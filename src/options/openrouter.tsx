@@ -77,12 +77,8 @@ export function OpenRouterSection() {
     return () => clearTimeout(timer);
   }, [saved]);
 
-  function update(patch: Partial<OpenRouterSettings>, persist = false) {
-    setSettings(current => {
-      const next = { ...current, ...patch };
-      if (persist) void writeOpenRouterSettings(next).then(() => setSaved(true));
-      return next;
-    });
+  function update(patch: Partial<OpenRouterSettings>) {
+    setSettings(current => ({ ...current, ...patch }));
   }
 
   async function save() {
@@ -149,7 +145,7 @@ export function OpenRouterSection() {
           onChange={speechModelId =>
             // The previous voice belongs to the previous model, so clear it and let
             // effectiveVoice resolve the new model's first voice.
-            update({ speechModel: speechModelId, voice: "" }, true)
+            update({ speechModel: speechModelId, voice: "" })
           }
         />
 
@@ -161,7 +157,7 @@ export function OpenRouterSection() {
             <select
               id="openrouter-voice"
               value={effectiveVoice(settings, catalog.speech)}
-              onChange={event => update({ voice: event.target.value }, true)}
+              onChange={event => update({ voice: event.target.value })}
               className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
             >
               {voices.map(voice => (

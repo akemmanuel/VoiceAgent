@@ -1,44 +1,38 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { WaveformIcon } from "@phosphor-icons/react";
+import { Separator } from "@/components/ui/separator";
 import { AccountSection } from "./account";
 import { EngineSection } from "./engine";
 import { OpenRouterSection } from "./openrouter";
 import { LogsSection } from "./logs";
-import { ProfileSection } from "./profile";
-import { VoiceConfigurationSection } from "./voice";
 
 function Options() {
   return (
-    <main className="options-shell min-h-screen px-6 py-10 sm:py-14">
-      <div className="mx-auto max-w-3xl">
-        <header className="app-header flex items-center gap-3">
-          <span className="brand-mark flex size-10 items-center justify-center rounded-xl text-primary-foreground">
-            <WaveformIcon size={22} weight="bold" aria-hidden="true" />
-          </span>
-          <div>
-            <span className="text-base font-semibold tracking-tight">VoiceAgent</span>
-            <p className="text-xs text-muted-foreground">Control center</p>
-          </div>
-        </header>
-
-        <div className="mb-8 mt-12 sm:mb-10">
-          <p className="eyebrow">Personalize your agent</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Settings</h1>
-          <p className="mt-3 max-w-xl text-base leading-7 text-muted-foreground">Choose how VoiceAgent listens, thinks, and responds while you browse.</p>
-        </div>
-
-        <div className="grid gap-5">
-          <div className="settings-card"><ProfileSection /></div>
-          <div className="settings-card"><EngineSection /></div>
-          <div className="settings-card"><AccountSection /></div>
-          <div className="settings-card"><OpenRouterSection /></div>
-          <div className="settings-card"><VoiceConfigurationSection /></div>
-          <div className="settings-card"><LogsSection /></div>
-        </div>
-
-        <footer className="py-8 text-center text-xs leading-5 text-muted-foreground">Changes are saved in this browser and applied to VoiceAgent.</footer>
-      </div>
+    <main className="mx-auto max-w-2xl px-6 py-10 sm:py-16">
+      <header className="flex items-center gap-2.5">
+        <WaveformIcon size={26} weight="bold" className="text-primary" aria-hidden="true" />
+        <span className="text-lg font-semibold tracking-tight">VoiceAgent</span>
+      </header>
+      <h1 className="mt-12 text-3xl font-semibold tracking-tight">Settings</h1>
+      <p className="mt-3 text-base leading-7 text-muted-foreground">Configure voice and accounts, or <a href="#logs" className="text-primary underline underline-offset-4">view logs</a> to troubleshoot a session.</p>
+      <Separator className="my-8" />
+      <EngineSection />
+      <Separator className="my-8" />
+      <AccountSection />
+      <Separator className="my-8" />
+      <OpenRouterSection />
+      <Separator className="my-8" />
+      <section aria-labelledby="voice-title">
+        <h2 id="voice-title" className="text-lg font-semibold">Voice configuration</h2>
+        <p className="mt-3 max-w-prose text-sm leading-6 text-muted-foreground">
+          Voice preferences aren't implemented yet. The popup's tab controls use temporary access to the active tab, and this page keeps your ChatGPT tokens in local extension storage.
+        </p>
+      </section>
+      <Separator className="my-8" />
+      <LogsSection />
+      <Separator className="my-8" />
+      <footer className="text-sm leading-6 text-muted-foreground">You can close this tab and return to the extension popup.</footer>
     </main>
   );
 }
